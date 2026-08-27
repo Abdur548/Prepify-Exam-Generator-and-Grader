@@ -1,0 +1,38 @@
+{
+  "blueprint_id": "midterm_default",
+  "title": "Midterm Examination",
+  "total_marks": 60,
+  "duration_minutes": 90,
+  "sections": [
+    {
+      "section_id": "A",
+      "title": "Multiple Choice Questions",
+      "item_type": "mcq",
+      "count": 15,
+      "marks_each": 2,
+      "bloom": ["remember", "understand"],
+      "options_count": 4,
+      "requires_flags_any": null
+    },
+    {
+      "section_id": "B",
+      "title": "Short Answer Questions",
+      "item_type": "short",
+      "count": 5,
+      "marks_each": 4,
+      "bloom": ["apply", "analyse"],
+      "options_count": null,
+      "requires_flags_any": null
+    },
+    {
+      "section_id": "C",
+      "title": "Long Answer Questions",
+      "item_type": "long",
+      "count": 2,
+      "marks_each": 5,
+      "bloom": ["evaluate", "create"],
+      "options_count": null,
+      "requires_flags_any": null
+    }
+  ]
+}

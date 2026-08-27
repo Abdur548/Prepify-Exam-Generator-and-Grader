@@ -1,0 +1,28 @@
+{
+  "blueprint_id": "quiz_default",
+  "title": "Weekly Quiz",
+  "total_marks": 20,
+  "duration_minutes": 30,
+  "sections": [
+    {
+      "section_id": "A",
+      "title": "Multiple Choice Questions",
+      "item_type": "mcq",
+      "count": 5,
+      "marks_each": 2,
+      "bloom": ["remember", "understand"],
+      "options_count": 4,
+      "requires_flags_any": null
+    },
+    {
+      "section_id": "B",
+      "title": "Short Answer Questions",
+      "item_type": "short",
+      "count": 2,
+      "marks_each": 5,
+      "bloom": ["apply"],
+      "options_count": null,
+      "requires_flags_any": null
+    }
+  ]
+}

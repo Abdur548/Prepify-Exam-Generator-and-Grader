@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coursegen"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf",
+    "python-pptx",
+    "FlagEmbedding",
+    "qdrant-client",
+    "sentence-transformers",
+    "pydantic>=2",
+    "fastapi",
+    "uvicorn",
+    "jinja2",
+    "weasyprint",
+    "yake",
+    "httpx",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+]
+
+[project.scripts]
+coursegen = "coursegen.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["coursegen*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live: marks tests that make real LLM API calls (deselected by default)",
+]

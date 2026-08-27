@@ -1,0 +1,38 @@
+{
+  "blueprint_id": "final_default",
+  "title": "Final Examination",
+  "total_marks": 100,
+  "duration_minutes": 180,
+  "sections": [
+    {
+      "section_id": "A",
+      "title": "Multiple Choice Questions",
+      "item_type": "mcq",
+      "count": 20,
+      "marks_each": 2,
+      "bloom": ["remember", "understand"],
+      "options_count": 4,
+      "requires_flags_any": null
+    },
+    {
+      "section_id": "B",
+      "title": "Short Answer Questions",
+      "item_type": "short",
+      "count": 8,
+      "marks_each": 5,
+      "bloom": ["apply", "analyse"],
+      "options_count": null,
+      "requires_flags_any": null
+    },
+    {
+      "section_id": "C",
+      "title": "Diagram and Equation Questions",
+      "item_type": "long",
+      "count": 4,
+      "marks_each": 5,
+      "bloom": ["evaluate", "create"],
+      "options_count": null,
+      "requires_flags_any": ["has_figure", "has_equation"]
+    }
+  ]
+}
