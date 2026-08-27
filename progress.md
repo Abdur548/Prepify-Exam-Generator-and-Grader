@@ -7,7 +7,7 @@
 | P0 | Foundation | PASS | `pytest -q` + `python -m coursegen --dry-run` | 2026-08-27 |
 | P2′ | Solver on fixture | PASS | `pytest tests/test_p2prime_solver.py -v` | 2026-08-27 |
 | P1 | Ingest | PASS | `pytest` + `python -m coursegen --dry-run`; gate = ingest twice → identical point count, node IDs, `course_map.json` hash | 2026-08-27 (re-verified after corrective pass) |
-| P2 | Solver on real data | NOT STARTED | | |
+| P2 | Solver on real data | PASS | `pytest tests/test_p2_solver_real.py -v` | 2026-08-28 |
 | P3 | Generation + validation | NOT STARTED | | |
 | P4 | Render + chat | NOT STARTED | | |
 | P5 | UI + resilience | NOT STARTED | | |
