@@ -74,10 +74,8 @@ def ingest(
         section_text = " ".join(
             b.text for b in sec.blocks if b.block_type == "text" and b.text.strip()
         )
-        token_count = max(1, len(section_text) // 4)
-        flags = NodeFlags(
-            has_figure=any(b.block_type == "figure" for b in sec.blocks),
-        )
+        token_count = max(1, len(section_text) // config.CHARS_PER_TOKEN_ESTIMATE)
+        flags = _derive_flags(sec)
         raw_nodes.append(_RawNode(
             node_id=_compute_node_id(sec.source_file, sec.path),
             path=sec.path,
@@ -164,6 +162,28 @@ def _compute_node_id(source_file: str, heading_path: list[str]) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
+def _derive_flags(section: LeafSection) -> NodeFlags:
+    """
+    OR the per-block content flags set by ingest/parse.py up to the section.
+
+    A section is flagged if ANY of its blocks is: the flag answers "can this node
+    anchor a question of that kind?", and one table on one page is enough.
+
+    Only `has_figure` is a hard fact (an image block is an image block). `has_table`
+    is a detection (PyMuPDF `find_tables` / python-pptx `shape.has_table`), and
+    `has_code` / `has_equation` are HEURISTICS whose false-positive and
+    false-negative modes are documented in ingest/parse.py's module docstring.
+    Blueprints filter candidate nodes on these flags (`requires_flags_any`), so a
+    flag that can never be true silently starves a whole exam section.
+    """
+    return NodeFlags(
+        has_figure=any(b.block_type == "figure" for b in section.blocks),
+        has_table=any(b.has_table for b in section.blocks),
+        has_equation=any(b.has_equation for b in section.blocks),
+        has_code=any(b.has_code for b in section.blocks),
+    )
+
+
 def _extract_key_terms(sections: list[LeafSection]) -> list[list[str]]:
     """Run YAKE on each section's text. CPU-only, no LLM calls."""
     extractor = yake.KeywordExtractor(
@@ -193,11 +213,24 @@ def _compute_instructional_mass(nodes: list["_RawNode"]) -> list[float]:
     """
     Instructional mass formula (decided 2026-08-27):
 
-        df_other(t) = number of OTHER source files containing term t
-                      (case-folded whole-token match)
+        df_other(t) = number of OTHER source files in which term t was itself
+                      extracted as a YAKE key term (case-folded exact match on the
+                      extracted term string)
         mean_df_i   = mean of df_other(t) over node i's YAKE key_terms ([] → 0.0)
         raw_i       = token_count_i × (1 + ln(1 + mean_df_i))
         mass_i      = raw_i / sum(raw)
+
+    NOTE — `df_other` measures key-term SALIENCE, not raw text presence. The
+    `term_docs` index below is built only from each node's YAKE `key_terms`, so a
+    term that appears in another document's body but did not make that document's
+    top-N key terms contributes 0. This is narrower than the "number of other source
+    files containing term t" that the plan's prose implies, and it is what the code
+    has always done. It is arguably the better measure — a term that is prominent
+    enough elsewhere to be extracted is stronger evidence of cross-document
+    importance than a term that merely occurs — but it IS a narrowing, and it is
+    flagged in todo.md for the human to confirm. Broadening it to raw text presence
+    would change every node's weight and therefore every exam allocation, so the
+    change is not made unilaterally.
 
     Degrades correctly with a single document: every df_other = 0,
     mass collapses to normalised token_count. This is the live-demo path.

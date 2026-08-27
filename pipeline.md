@@ -1,11 +1,15 @@
 # Current Pipeline
 
-_Last updated: 2026-08-27 · phase: P2' (post-review corrective pass)_
+_Last updated: 2026-08-27 · phase: P1 (post-review corrective pass)_
 
 ## Flow
 
 ```
-[fixture] CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageReport
+source docs (PDF/PPTX)
+  → parse → structure → chunk → embed → index (Qdrant)
+                              ↘ course_map.json  (CourseMapNode[])
+
+CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageReport
 ```
 
 ## Stages
@@ -41,7 +45,79 @@ _Last updated: 2026-08-27 · phase: P2' (post-review corrective pass)_
 - **Status:** implemented (on fixture; real data in P2)
 
 ### Ingest
-- **Status:** not started (P1)
+- **Input:** a directory of `.pdf` / `.pptx` / `.ppt` files
+- **Output:** `list[CourseMapNode]` persisted to `course_map.json`, plus dense+sparse
+  points in the Qdrant collection
+- **Modules:** `ingest/parse.py` → `structure.py` → `chunk.py` → `embed.py` → `index.py`,
+  orchestrated by `ingest/coursemap.py`
+- **LLM calls:** none, at any stage (C2, §9.1). Key terms come from YAKE, which is CPU-only.
+- **Key parameters:** `MAX_CHUNK_TOKENS = 512`, `CHUNK_OVERLAP_PCT = 0.15`,
+  `HEADING_STD_FACTOR = 1.5`, `CHARS_PER_TOKEN_ESTIMATE = 4`, `PARSE_TIMEOUT_SECONDS = 60`
+- **Heading detection:** relative font-size threshold (`modal + 1.5σ`), never an absolute
+  cutoff — a slide-exported PDF has 24 pt body text and an absolute threshold would call
+  every block a heading. PPTX uses placeholder types TITLE / CENTER_TITLE.
+- **Idempotency (C1):** `chunk_id = uuid5(...)` over content, so a re-ingest upserts by key
+  instead of appending. `node_id = sha1(source_file + "|" + "/".join(path))`.
+  `COURSE_MAP_FLOAT_PRECISION` + `JSON_SORT_KEYS` make the JSON byte-stable.
+- **Per-file timeout (S3):** each file is parsed under a
+  `ThreadPoolExecutor.result(timeout=PARSE_TIMEOUT_SECONDS)` watchdog; an overrun is logged
+  and the file skipped. `signal.alarm` is Unix-only, and a Python thread cannot be killed, so
+  this buys **batch isolation, not preemption** — the abandoned parse keeps running until the
+  process exits. `multiprocessing` was rejected: it collides with Qdrant's exclusive file
+  lock (S8).
+- **Status:** implemented
+
+#### Content flags — how `NodeFlags` is derived, and what each flag is worth
+
+`ingest/parse.py` sets flags per block; `ingest/coursemap.py::_derive_flags` ORs them across a
+leaf section's blocks. A section is flagged if **any** of its blocks is, because the flag
+answers "can this node anchor a question of that kind?".
+
+| Flag | Status | PDF source | PPTX source |
+|---|---|---|---|
+| `has_figure` | fact | image block (`get_text("dict")` type 1) | shape type `MSO_SHAPE_TYPE.PICTURE` |
+| `has_table` | detection | `page.find_tables()`; a text block whose bbox intersects a detected table's bbox | `shape.has_table` (exact) |
+| `has_code` | **heuristic** | span font name matches `MONOSPACE_FONT_SUBSTRINGS` | `run.font.name` matches the same list |
+| `has_equation` | **heuristic** | font name in `MATH_FONT_SUBSTRINGS`, **or** ≥ `EQUATION_MIN_MATH_CHARS` characters from `MATH_UNICODE_RANGES` | same two prongs |
+
+This matters beyond completeness: blueprints filter candidate nodes with
+`requires_flags_any`, so **a flag that can never be true silently starves a whole exam
+section**. `final_default.json` section C requires `["has_figure", "has_equation"]`; while
+`has_equation` was hardcoded `False` that section degraded to figure-only without saying so.
+
+Known false modes, stated rather than buried:
+- `has_code` sees monospace and nothing else. There is no lexical or syntactic analysis.
+  Prose in a monospace face is a false positive; code in a proportional face is a false
+  negative.
+- `has_equation` cannot see mathematics that was typeset as an **image**, and MVP1 has no
+  OCR. `"Symbol"` is deliberately excluded from the math-font list even though it looks like
+  an obvious candidate: Word sets its default list bullet in the Symbol face, so including it
+  would flag every bulleted deck. Greek, arrows, letterlike symbols and `± × ÷` are excluded
+  from the Unicode ranges for the same reason — `config.py` records each exclusion.
+- Both font-name prongs are blind on PPTX runs that inherit their face from the layout or
+  theme, which is the common case (`run.font.name` is then `None`).
+- PPTX table **cell text is not extracted** (MVP1); the block exists only to carry the flag.
+
+#### `instructional_mass`
+
+```
+df_other(t) = number of OTHER source files in which term t was itself extracted
+              as a YAKE key term (case-folded exact match)
+mean_df_i   = mean of df_other(t) over node i's key_terms      # [] -> 0.0
+raw_i       = token_count_i * (1 + ln(1 + mean_df_i))
+mass_i      = raw_i / sum(raw)                                 # sums to 1.0
+```
+
+`df_other` measures key-term **salience**, not raw text presence: the index is built only
+from each node's YAKE `key_terms`, so a term occurring in another document's body but outside
+its top-N key terms contributes 0. That is narrower than "number of other source files
+containing term t" and is flagged in `todo.md` for the human to confirm. `token_count` is
+`len(section_text) // CHARS_PER_TOKEN_ESTIMATE` — a cheap divisor, not a tokenizer; it is only
+ever used relatively, so the uniform scaling error cancels.
+
+With a single source document every `df_other` is 0 and mass collapses to normalised
+`token_count`. That is the live-demo path, so **this term is invisible in the demo** — do not
+tune it by watching the demo.
 
 ### Generation
 - **Status:** not started (P3)
@@ -57,6 +133,7 @@ _Last updated: 2026-08-27 · phase: P2' (post-review corrective pass)_
 | Contract | Module | Produced by | Consumed by |
 |---|---|---|---|
 | `CourseMapNode` | `contracts/course_map.py` | `ingest/coursemap.py` (P1) | `exam/allocate.py` (P2) |
+| `NodeFlags` | `contracts/course_map.py` | `ingest/parse.py` blocks → `ingest/coursemap.py::_derive_flags` (P1) | `exam/allocate.py` `requires_flags_any` filter (P2) |
 | `Blueprint` | `contracts/blueprint.py` | hand-authored JSON | `exam/allocate.py` (P2) |
 | `ItemSpec` | `contracts/item.py` | `exam/allocate.py` (P2) | `exam/generate.py` (P3) |
 | `GeneratedItem` | `contracts/item.py` | `exam/generate.py` (P3) | `exam/validate.py`, `exam/render.py` (P4) |
@@ -105,3 +182,9 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-27 | (uncommitted) | `spec_hash` includes `marks` and `options_count` | Cross-paper cache collision between a 4-mark and a 5-mark item on the same node+span | P2' fix |
 | 2026-08-27 | (uncommitted) | `SectionSpec.bloom` min_length=1; `Blueprint` marks-sum validator; `GeneratedItem` options/correct_option validator | Contracts that parsed invalid data cleanly | P2' fix |
 | 2026-08-27 | (uncommitted) | `COURSE_MAP_FLOAT_PRECISION`, `JSON_SORT_KEYS`; unit comments on `RERANKER_THRESHOLD` / `GROUNDEDNESS_TAU` | P1's identical-hash gate needs a rounding + key-order policy; both thresholds are raw logits, not similarities | P2' fix |
+| 2026-08-27 | 029b504 | Full ingest: `parse` / `structure` / `chunk` / `embed` / `index` / `coursemap` | P1 | P1 |
+| 2026-08-27 | (uncommitted) | `has_table` detected, `has_code` + `has_equation` implemented heuristically | Three of four `NodeFlags` were hardcoded `False`, so `final_default.json` section C silently degraded to figure-only | P1 fix |
+| 2026-08-27 | (uncommitted) | `PARSE_TIMEOUT_SECONDS` actually applied, via a thread watchdog in `parse_directory` | The constant was defined and used nowhere; S3 requires a per-file timeout | P1 fix |
+| 2026-08-27 | (uncommitted) | `CHARS_PER_TOKEN_ESTIMATE` in config; `MSO_SHAPE_TYPE.PICTURE` replaces `shape_type == 13` | Two magic numbers, one of them feeding `instructional_mass` | P1 fix |
+| 2026-08-27 | (uncommitted) | `df_other` docstring corrected to describe key-term salience | The doc claimed raw text presence; the code has always measured YAKE key-term salience. Code is truth, doc was wrong | P1 fix |
+| 2026-08-27 | (uncommitted) | Real-Qdrant point-count test; ingest→solver integration test | The P1 gate's point-count condition and the fixture-vs-reality seam were both untested | P1 fix |

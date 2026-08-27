@@ -2,18 +2,29 @@
 P1 gate tests — ingest pipeline.
 
 Gates (all must pass before P2):
-  1. Ingest twice → identical node IDs and identical course_map.json hash
+  1. Ingest twice → identical POINT COUNT, identical node IDs, identical
+     course_map.json hash
   2. Slide-exported PDF: heading_fraction < HEADING_MAX_BLOCK_PCT (0.30)
   3. Malformed PDF fails that file only; parse_directory returns remaining docs
-  4. Figure flag set on a document containing an embedded image
+  4. Content flags (figure / table / code / equation) set on documents that carry
+     the corresponding content
   5. OCR not triggered on a native-text PDF (no warning about missing text layer)
   6. Two documents with the same heading produce distinct node_ids
+  7. A course map produced by REAL ingest can be solved by exam.allocate.solve()
+     without the flag-filtered section starving
+
+The point-count gate (1) and the ingest→solver seam (7) use a REAL local-mode
+Qdrant on tmp_path. `QdrantClient(path=...)` is pure filesystem — no network — so
+this does not breach the zero-network-calls rule for the default test run. Local
+mode takes an EXCLUSIVE FILE LOCK, so every client opened here is closed in a
+`finally` before the next one opens, and each test gets a fresh tmp_path.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import shutil
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -21,16 +32,27 @@ import numpy as np
 import pytest
 
 from coursegen import config
+from coursegen.contracts.blueprint import Blueprint
+from coursegen.exam.allocate import solve
 from coursegen.ingest.chunk import Chunk, _chunk_id, chunk_section
 from coursegen.ingest.coursemap import (
     _compute_node_id,
     _compute_instructional_mass,
+    _derive_flags,
     ingest,
     load_course_map,
     save_course_map,
     _RawNode,
 )
-from coursegen.ingest.parse import parse_directory, parse_file
+from coursegen.ingest.index import get_client
+from coursegen.ingest.parse import (
+    count_math_chars,
+    is_code_font,
+    is_equation_content,
+    is_math_font,
+    parse_directory,
+    parse_file,
+)
 from coursegen.ingest.structure import extract_sections, heading_fraction
 from coursegen.contracts.course_map import NodeFlags
 
@@ -396,3 +418,368 @@ class TestCourseMapPersistence:
         orig_ids = sorted(n.node_id for n in original_nodes)
         load_ids = sorted(n.node_id for n in loaded_nodes)
         assert orig_ids == load_ids
+
+
+# ---------------------------------------------------------------------------
+# Content flag heuristics — unit level
+#
+# `has_equation`'s font-name prong cannot be driven through a synthetic PDF:
+# PyMuPDF's base-14 fonts substitute U+00B7 for every mathematical glyph and no
+# CMMI / Cambria Math face may be embedded (no new dependencies). The unit is
+# therefore the seam that gets tested; the Unicode prong is additionally covered
+# end-to-end through PPTX below.
+# ---------------------------------------------------------------------------
+
+class TestCodeFontHeuristic:
+    def test_courier_detected(self) -> None:
+        assert is_code_font(["Courier"])
+
+    def test_common_monospace_families_detected(self) -> None:
+        for name in [
+            "Consolas", "DejaVuSansMono", "Menlo-Regular",
+            "Inconsolata", "CascadiaCode", "ABCDEF+LiberationMono",
+        ]:
+            assert is_code_font([name]), name
+
+    def test_case_insensitive(self) -> None:
+        assert is_code_font(["COURIERNEW-BOLD"])
+
+    def test_proportional_fonts_not_detected(self) -> None:
+        for name in ["Helvetica", "TimesNewRomanPSMT", "Calibri", "Arial-Black"]:
+            assert not is_code_font([name]), name
+
+    def test_empty_font_list_is_false(self) -> None:
+        assert not is_code_font([])
+
+    def test_one_monospace_span_flags_the_block(self) -> None:
+        assert is_code_font(["Helvetica", "Courier", "Helvetica"])
+
+
+class TestEquationHeuristic:
+    def test_tex_math_fonts_detected(self) -> None:
+        for name in ["CMMI10", "CMSY7", "CMEX10", "ABCDEF+CMMI12"]:
+            assert is_math_font([name]), name
+
+    def test_word_equation_font_detected(self) -> None:
+        assert is_math_font(["Cambria Math"])
+        assert is_math_font(["CambriaMath-Regular"])
+
+    def test_symbol_font_deliberately_not_math(self) -> None:
+        """
+        Word sets its default list bullet (U+F0B7) in the Symbol face, so treating
+        "Symbol" as a mathematics font would flag every bulleted deck as containing
+        equations. The exclusion is a decision, not an oversight — see config.py.
+        """
+        assert not is_math_font(["Symbol"])
+        assert not is_equation_content(["Symbol"], "First bullet point")
+
+    def test_body_fonts_not_math(self) -> None:
+        for name in ["Helvetica", "Calibri", "TimesNewRomanPSMT"]:
+            assert not is_math_font([name]), name
+
+    def test_math_unicode_counted(self) -> None:
+        assert count_math_chars("∀x ∈ S: ∑ y ≤ ∞") == 5   # ∀ ∈ ∑ ≤ ∞
+
+    def test_prose_counts_zero(self) -> None:
+        assert count_math_chars("Plain prose with no mathematics at all.") == 0
+
+    def test_excluded_ranges_count_zero(self) -> None:
+        """Greek, arrows, letterlike and ± × ÷ are deliberately NOT counted."""
+        assert count_math_chars("alpha α beta β Input → Output ™ 1920×1080 ±5%") == 0
+
+    def test_single_inline_symbol_is_not_an_equation(self) -> None:
+        """One comparison operator in prose must not flag a whole section."""
+        text = "The algorithm terminates when the error ≤ the tolerance."
+        assert count_math_chars(text) == 1
+        assert not is_equation_content(["Helvetica"], text)
+
+    def test_dense_math_text_is_an_equation(self) -> None:
+        text = "∀x ∈ D, ∂J/∂θ ≠ 0 and ∑ w ≤ ∞"
+        assert count_math_chars(text) >= config.EQUATION_MIN_MATH_CHARS
+        assert is_equation_content(["Helvetica"], text)
+
+    def test_math_font_wins_without_math_unicode(self) -> None:
+        """A CMMI span carries no U+2200-range codepoints, but is still an equation."""
+        assert is_equation_content(["CMMI10"], "x y z")
+
+
+# ---------------------------------------------------------------------------
+# Content flags — end to end through the parsers
+# ---------------------------------------------------------------------------
+
+class TestPDFContentFlags:
+    def test_table_blocks_marked(self, table_code_pdf: Path) -> None:
+        doc = parse_file(table_code_pdf)
+        table_blocks = [b for b in doc.blocks if b.has_table]
+        assert table_blocks, "page.find_tables() found no table in a ruled-grid PDF"
+        assert all(b.page == 0 for b in table_blocks), (
+            "has_table leaked onto a page with no table"
+        )
+
+    def test_code_blocks_marked(self, table_code_pdf: Path) -> None:
+        doc = parse_file(table_code_pdf)
+        code_blocks = [b for b in doc.blocks if b.has_code]
+        assert code_blocks, "Courier listing was not flagged has_code"
+        assert all(b.page == 1 for b in code_blocks)
+
+    def test_flags_reach_the_section(self, table_code_pdf: Path) -> None:
+        doc = parse_file(table_code_pdf)
+        sections = extract_sections(doc)
+        flags = [_derive_flags(s) for s in sections]
+        assert any(f.has_table for f in flags), "has_table did not reach any section"
+        assert any(f.has_code for f in flags), "has_code did not reach any section"
+
+    def test_prose_pdf_sets_no_content_flags(self, native_pdf: Path) -> None:
+        """A plain prose PDF must not trip any heuristic — false positives matter."""
+        doc = parse_file(native_pdf)
+        assert not any(b.has_table for b in doc.blocks)
+        assert not any(b.has_code for b in doc.blocks)
+        assert not any(b.has_equation for b in doc.blocks)
+
+
+class TestPPTXContentFlags:
+    def test_table_shape_flagged(self, math_pptx: Path) -> None:
+        doc = parse_file(math_pptx)
+        assert any(b.has_table for b in doc.blocks), (
+            "shape.has_table did not produce a has_table block"
+        )
+
+    def test_math_unicode_slide_flagged(self, math_pptx: Path) -> None:
+        doc = parse_file(math_pptx)
+        assert any(b.has_equation for b in doc.blocks), (
+            "Unicode mathematics in a slide body was not flagged has_equation"
+        )
+
+    def test_monospace_run_flagged(self, math_pptx: Path) -> None:
+        doc = parse_file(math_pptx)
+        assert any(b.has_code for b in doc.blocks), (
+            "run.font.name='Consolas' was not flagged has_code"
+        )
+
+    def test_picture_shape_still_detected(self, math_pptx: Path) -> None:
+        """
+        Regression for the `shape_type == 13` magic number replaced by
+        MSO_SHAPE_TYPE.PICTURE: figure blocks must still be emitted.
+        """
+        doc = parse_file(math_pptx)
+        assert any(b.block_type == "figure" for b in doc.blocks)
+
+    def test_titles_do_not_trip_flags(self, minimal_pptx: Path) -> None:
+        doc = parse_file(minimal_pptx)
+        assert not any(b.has_table or b.has_code or b.has_equation for b in doc.blocks)
+
+
+# ---------------------------------------------------------------------------
+# S3 — per-file parse timeout (PARSE_TIMEOUT_SECONDS)
+# ---------------------------------------------------------------------------
+
+class TestParseTimeout:
+    def test_slow_file_is_skipped_and_batch_completes(
+        self, native_pdf: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A file that overruns PARSE_TIMEOUT_SECONDS is logged as failed and skipped;
+        the rest of the batch still parses (R3 batch isolation, S3 timeout).
+
+        The stand-in slow parse blocks on an Event rather than sleeping, so the
+        abandoned worker thread is released the moment the assertion is done — a
+        Python thread cannot be killed, and a bare sleep would linger for the rest of
+        the session.
+        """
+        from coursegen.ingest import parse as parse_mod
+
+        source_dir = tmp_path / "docs"
+        source_dir.mkdir()
+        shutil.copy(native_pdf, source_dir / "good.pdf")
+        shutil.copy(native_pdf, source_dir / "slow.pdf")
+
+        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", 0.2)
+        real_parse_file = parse_mod.parse_file
+        release = threading.Event()
+
+        def slow_for_one_file(path: Path):
+            if path.name == "slow.pdf":
+                release.wait(timeout=30)
+                raise ValueError("released after the batch moved on")
+            return real_parse_file(path)
+
+        monkeypatch.setattr(parse_mod, "parse_file", slow_for_one_file)
+        try:
+            docs = parse_directory(source_dir)
+        finally:
+            release.set()
+
+        assert [d.source_file for d in docs] == ["good.pdf"], (
+            "the timed-out file was not skipped, or it took the batch down with it"
+        )
+
+    def test_timeout_error_names_the_config_constant(
+        self, native_pdf: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The failure must be legible in the log, not an anonymous timeout."""
+        from coursegen.ingest import parse as parse_mod
+
+        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", 0.2)
+        release = threading.Event()
+
+        def never_finishes(path: Path):
+            release.wait(timeout=30)
+            raise ValueError("released")
+
+        monkeypatch.setattr(parse_mod, "parse_file", never_finishes)
+        try:
+            with pytest.raises(TimeoutError, match="PARSE_TIMEOUT_SECONDS"):
+                parse_mod._parse_file_with_timeout(native_pdf)
+        finally:
+            release.set()
+
+
+# ---------------------------------------------------------------------------
+# Real-Qdrant helpers — no mocked upsert, no network
+# ---------------------------------------------------------------------------
+
+def _ingest_with_real_qdrant(source_dir: Path, data_dir: Path) -> list:
+    """
+    Run the full ingest with the fake embedder but a REAL local-mode Qdrant.
+
+    Only `load_model` / `embed_chunks` are patched — the model download is the one
+    thing that would need the network. Index writes are genuine, which is the whole
+    point: a MagicMock upsert cannot demonstrate idempotency.
+    """
+    with patch("coursegen.ingest.coursemap.load_model", return_value=MagicMock()), \
+         patch("coursegen.ingest.coursemap.embed_chunks", side_effect=_fake_embed_result):
+        return ingest(source_dir, data_dir)
+
+
+def _point_count(data_dir: Path) -> int:
+    """Points currently in the collection. Closes the client — local mode locks."""
+    client = get_client(data_dir)
+    try:
+        return client.count(collection_name=config.QDRANT_COLLECTION_NAME).count
+    finally:
+        client.close()
+
+
+# ---------------------------------------------------------------------------
+# P1 gate condition 3 — identical POINT COUNT across two ingests
+# ---------------------------------------------------------------------------
+
+class TestIngestPointCount:
+    """
+    The third P1 gate condition. `TestIngestIdempotency` above mocks the Qdrant
+    client, so `upsert` is a MagicMock and nothing there exercises the actual claim:
+    that re-ingesting UPSERTS BY uuid5 KEY instead of duplicating points (C1, L12).
+    """
+
+    def test_point_count_identical_on_double_ingest(
+        self, native_pdf: Path, tmp_path: Path
+    ) -> None:
+        source_dir = tmp_path / "docs"
+        source_dir.mkdir()
+        shutil.copy(native_pdf, source_dir / native_pdf.name)
+        data_dir = tmp_path / "data"
+
+        nodes1 = _ingest_with_real_qdrant(source_dir, data_dir)
+        count1 = _point_count(data_dir)
+
+        nodes2 = _ingest_with_real_qdrant(source_dir, data_dir)
+        count2 = _point_count(data_dir)
+
+        chunk_ids = [cid for n in nodes1 for cid in n.chunk_ids]
+        assert count1 == len(chunk_ids), (
+            f"first ingest wrote {count1} points for {len(chunk_ids)} chunks"
+        )
+        assert count2 == count1, (
+            f"re-ingest duplicated points: {count1} → {count2}. "
+            "uuid5 chunk IDs are supposed to make upsert a no-op (C1)."
+        )
+        assert sorted(cid for n in nodes2 for cid in n.chunk_ids) == sorted(chunk_ids)
+
+    def test_multi_document_corpus_point_count_stable(
+        self, rich_source_dir: Path, tmp_path: Path
+    ) -> None:
+        """Same gate over a mixed PDF + PPTX corpus, not a single file."""
+        data_dir = tmp_path / "data"
+
+        nodes1 = _ingest_with_real_qdrant(rich_source_dir, data_dir)
+        count1 = _point_count(data_dir)
+        _ingest_with_real_qdrant(rich_source_dir, data_dir)
+        count2 = _point_count(data_dir)
+
+        chunk_ids = [cid for n in nodes1 for cid in n.chunk_ids]
+        assert count1 == len(chunk_ids)
+        assert count2 == count1
+
+
+# ---------------------------------------------------------------------------
+# Ingest → solver integration (the seam nothing tested)
+#
+# tests/fixtures/course_map_sample.json gave the P2' solver has_table=5,
+# has_figure=7, has_equation=9. Real ingest could never produce a non-zero
+# has_table or has_equation, so the solver was validated against a candidate-pool
+# shape that did not exist. This runs the solver on a course map real ingest built.
+# ---------------------------------------------------------------------------
+
+class TestIngestSolverIntegration:
+    @staticmethod
+    def _final_default() -> Blueprint:
+        path = (
+            Path(__file__).parent.parent
+            / "coursegen" / "exam" / "blueprints" / "final_default.json"
+        )
+        return Blueprint.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+    def test_real_course_map_solves_final_default(
+        self, rich_source_dir: Path, tmp_path: Path
+    ) -> None:
+        blueprint = self._final_default()
+        course_map = _ingest_with_real_qdrant(rich_source_dir, tmp_path / "data")
+        assert course_map, "ingest produced no nodes from the rich corpus"
+
+        items, report = solve(course_map, blueprint)
+
+        # The flag-filtered section is the one the fixture could not have exercised.
+        section_c = next(s for s in blueprint.sections if s.section_id == "C")
+        assert section_c.requires_flags_any, "final_default section C lost its flag filter"
+        c_items = [i for i in items if i.slot_id.startswith("C-")]
+        assert c_items, (
+            "Section C is entirely unfilled on a real ingest course map. "
+            f"requires_flags_any={section_c.requires_flags_any}; "
+            "flag counts = " + repr({
+                flag: sum(1 for n in course_map if getattr(n.flags, flag))
+                for flag in ("has_figure", "has_table", "has_equation", "has_code")
+            })
+        )
+
+        # Every item in a flag-filtered section must come from a node that matches.
+        by_id = {n.node_id: n for n in course_map}
+        for item in c_items:
+            node = by_id[item.node_id]
+            assert any(
+                getattr(node.flags, flag) for flag in section_c.requires_flags_any
+            ), f"{item.slot_id} was filled from a node matching no required flag"
+
+        # fill_ratio must be reported — coverage_ratio alone can read 1.00 on an
+        # incomplete paper.
+        assert report.slots_total == sum(s.count for s in blueprint.sections)
+        assert report.slots_filled == len(items)
+        assert 0.0 <= report.fill_ratio <= 1.0
+        assert report.fill_ratio == pytest.approx(
+            report.slots_filled / report.slots_total
+        )
+
+    def test_real_ingest_produces_every_detectable_flag(
+        self, rich_source_dir: Path, tmp_path: Path
+    ) -> None:
+        """
+        The regression that item 1 of this pass existed to prevent: three of the four
+        NodeFlags were hardcoded False, so a blueprint could require a flag no real
+        document could ever set.
+        """
+        course_map = _ingest_with_real_qdrant(rich_source_dir, tmp_path / "data")
+        counts = {
+            flag: sum(1 for n in course_map if getattr(n.flags, flag))
+            for flag in ("has_figure", "has_table", "has_equation", "has_code")
+        }
+        for flag, count in counts.items():
+            assert count > 0, f"{flag} is never True on real ingest output: {counts}"

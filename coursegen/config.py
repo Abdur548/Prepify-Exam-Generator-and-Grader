@@ -32,6 +32,78 @@ OCR_DPI: int = 150
 COURSE_MAP_FLOAT_PRECISION: int = 6   # decimal places instructional_mass is rounded to before serialisation
 JSON_SORT_KEYS: bool = True           # deterministic key order when persisting JSON
 
+# Cheap character→token estimate used for CourseMapNode.token_count, which feeds
+# instructional_mass. This is NOT a tokenizer: it is a constant divisor over the
+# section's character count. It is good enough because instructional_mass only ever
+# uses token_count RELATIVELY (each node's share of the corpus total), so a uniform
+# scaling error cancels out. Replace with a real tokenizer only if an absolute token
+# budget is ever computed from this number.
+CHARS_PER_TOKEN_ESTIMATE: int = 4
+
+# ---------------------------------------------------------------------------
+# Content flag heuristics (NodeFlags.has_code / has_equation)
+# ---------------------------------------------------------------------------
+# These are HEURISTICS, not detectors. They are matched case-insensitively as
+# substrings of the font name reported by the parser (PyMuPDF span "font",
+# python-pptx run.font.name).
+
+# Monospace font families → has_code. Monospace is the only signal available in the
+# pinned stack; prose set in a monospace face will false-positive.
+MONOSPACE_FONT_SUBSTRINGS: tuple[str, ...] = (
+    "mono",          # DejaVu Sans Mono, Liberation Mono, Roboto Mono, PT Mono, …
+    "courier",
+    "consolas",
+    "menlo",
+    "inconsolata",
+    "sourcecodepro",
+    "fira code",
+    "firacode",
+    "cascadia",
+)
+
+# Dedicated mathematics font families → has_equation. CMMI/CMSY/CMEX are TeX's
+# Computer Modern math fonts and appear in essentially every LaTeX-produced PDF that
+# contains mathematics; "Cambria Math" is Word's equation font.
+#
+# "Symbol" is DELIBERATELY EXCLUDED even though it is a plausible-looking candidate:
+# Word sets its default list bullet (U+F0B7) in the Symbol face, so any bulleted
+# Word-exported deck would flag every bulleted section as containing an equation.
+MATH_FONT_SUBSTRINGS: tuple[str, ...] = (
+    "cmmi",            # Computer Modern Math Italic
+    "cmsy",            # Computer Modern Symbol
+    "cmex",            # Computer Modern Extension
+    "mathematicalpi",
+    "cambria math",
+    "cambriamath",
+    "latinmodernmath",
+    "lmmath",
+    "stixmath",
+    "xitsmath",
+    "asanamath",
+    "euclidmath",
+)
+
+# Unicode blocks counted as "mathematical" for the text-based half of the
+# has_equation heuristic. Deliberately conservative — blocks that carry mathematics
+# and little else. NOT included, and why:
+#   Greek (U+0370–U+03FF)          — Greek prose and ordinary words ("alpha release")
+#   Arrows (U+2190–U+21FF)         — slide bullets ("Input → Output")
+#   Letterlike (U+2100–U+214F)     — contains ™ and ©
+#   ± × ÷ (Latin-1 singletons)     — "1920×1080", "±5%"
+MATH_UNICODE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x2070, 0x209F),    # Superscripts and Subscripts
+    (0x2200, 0x22FF),    # Mathematical Operators
+    (0x27C0, 0x27EF),    # Miscellaneous Mathematical Symbols-A
+    (0x2980, 0x29FF),    # Miscellaneous Mathematical Symbols-B
+    (0x2A00, 0x2AFF),    # Supplemental Mathematical Operators
+    (0x1D400, 0x1D7FF),  # Mathematical Alphanumeric Symbols
+)
+# Minimum number of MATH_UNICODE_RANGES characters in one block before that block is
+# flagged has_equation. An absolute count, not a ratio: a ratio makes a three-character
+# block ("x≤y") look denser than a real displayed equation inside a paragraph.
+# 3 is chosen so a single inline symbol in prose ("where x ≤ 5") does not trip it.
+EQUATION_MIN_MATH_CHARS: int = 3
+
 # ---------------------------------------------------------------------------
 # Security / parser limits (S3)
 # ---------------------------------------------------------------------------

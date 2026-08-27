@@ -47,7 +47,7 @@
 
 ---
 
-## Corrective pass on P0 / P2′  [COMPLETE — uncommitted, awaiting human review of the diff]
+## Corrective pass on P0 / P2′  [COMPLETE — shipped as `9b6bc9c`]
 
 From a senior review of `3eb0da9`. Full write-up in `progress.md`.
 
@@ -123,9 +123,9 @@ mass_i       = raw_i / sum(raw)                                   # sums to 1.0
 
 ---
 
-## P1 — Ingest  [NEXT — UNBLOCKED 2026-08-27, all decisions made]
+## P1 — Ingest  [COMPLETE — gate PASS 2026-08-27, re-verified after the corrective pass below]
 
-- [ ] **Add `.gitattributes` pinning `*.json` to `text eol=lf` (or mark `course_map.json`
+- [x] **Add `.gitattributes` pinning `*.json` to `text eol=lf` (or mark `course_map.json`
       `-text`).** `core.autocrlf=true` is set on this machine and the repo has no
       `.gitattributes`, so committed JSON is LF→CRLF converted on checkout. P1's gate is
       "identical `course_map.json` hash" and §14.6 commits a pre-baked demo collection — a hash
@@ -134,22 +134,92 @@ mass_i       = raw_i / sum(raw)                                   # sums to 1.0
       corrective pass.
 
 ### Build
-- [ ] `ingest/parse.py` — PyMuPDF + python-pptx, retain image blocks
-- [ ] `ingest/structure.py` — relative-font heading tree
-- [ ] `ingest/chunk.py` — leaf-section chunks, uuid5 IDs
-- [ ] `ingest/embed.py` — BGE-M3 dense+sparse single forward pass
-- [ ] `ingest/index.py` — Qdrant named vectors
-- [ ] `ingest/coursemap.py` — build + persist course_map.json, using
+- [x] `ingest/parse.py` — PyMuPDF + python-pptx, retain image blocks
+- [x] `ingest/structure.py` — relative-font heading tree
+- [x] `ingest/chunk.py` — leaf-section chunks, uuid5 IDs
+- [x] `ingest/embed.py` — BGE-M3 dense+sparse single forward pass
+- [x] `ingest/index.py` — Qdrant named vectors
+- [x] `ingest/coursemap.py` — build + persist course_map.json, using
       `COURSE_MAP_FLOAT_PRECISION` and `JSON_SORT_KEYS` (the identical-hash gate below is
       unachievable without a fixed rounding and key-order policy)
 
 ### Tests
-- [ ] Ingest twice → identical point count, identical node IDs, identical `course_map.json` hash
-- [ ] Slide-exported-PDF fixture: <30% of blocks classified as headings
-- [ ] Malformed PDF fails that file only; batch completes
-- [ ] Figure flags set on a document containing images
-- [ ] OCR NOT triggered on native-text PDF
-- [ ] Two documents sharing a heading produce two distinct nodes with correct `source_file`
+- [x] Ingest twice → identical point count, identical node IDs, identical `course_map.json` hash
+      — the **point count** half was missing until the corrective pass below
+      (`TestIngestPointCount`, real local-mode Qdrant on `tmp_path`; the pre-existing
+      idempotency tests mocked `upsert`, so nothing exercised the claim)
+- [x] Slide-exported-PDF fixture: <30% of blocks classified as headings
+- [x] Malformed PDF fails that file only; batch completes
+- [x] Figure flags set on a document containing images
+- [x] OCR NOT triggered on native-text PDF
+- [x] Two documents sharing a heading produce two distinct nodes with correct `source_file`
+
+---
+
+## Corrective pass on P1  [COMPLETE — shipped, gates independently re-verified]
+
+From a senior review of `029b504`, whose PASS was premature. Full write-up in `progress.md`.
+
+- [x] `has_table` detected properly — `page.find_tables()` (PDF, block bbox ∩ table bbox) and
+      `shape.has_table` (PPTX). No new dependency.
+- [x] `has_code` implemented as a documented monospace-font-name heuristic;
+      `MONOSPACE_FONT_SUBSTRINGS` lives in `config.py`
+- [x] `has_equation` **implemented, not stubbed** — a math font name **or** ≥
+      `EQUATION_MIN_MATH_CHARS` characters from `MATH_UNICODE_RANGES`. `final_default.json` was
+      therefore NOT edited and still requires `["has_figure", "has_equation"]`.
+- [x] `PARSE_TIMEOUT_SECONDS` actually applied — thread watchdog in `parse_directory`. Batch
+      isolation, not preemption; the limitation is stated in the docstring.
+- [x] `shape_type == 13` → `MSO_SHAPE_TYPE.PICTURE`; `len(text) // 4` →
+      `config.CHARS_PER_TOKEN_ESTIMATE`
+- [x] `numpy` declared in `pyproject.toml` (declaring an existing transitive dependency, not
+      adding one)
+- [x] `df_other` docstring corrected to describe what the code actually does — see the
+      confirmation request below
+- [x] Ingest → solver integration test on a REAL course map (`TestIngestSolverIntegration`)
+- [x] `progress.md` point-count gate line restored; `pipeline.md` Ingest stage written
+- [x] 31 new tests; 122 pass; both gates green; zero-network re-verified with sockets blocked
+
+### NEEDS HUMAN CONFIRMATION — `df_other` is narrower than the plan's prose
+
+The plan and the old docstring both said:
+
+> `df_other(t)` = number of OTHER source files **containing** term t
+
+The code has always measured something narrower. `term_docs` is built only from each node's
+YAKE `key_terms`, so `df_other(t)` counts the other source files in which t was itself
+**extracted as a key term**. A term present in another document's body but outside that
+document's top-N key terms contributes 0. It measures **salience**, not presence.
+
+- [ ] **Confirm or reject this narrowing.** The docstring now describes the implemented
+      behaviour; the computation was deliberately left alone. The narrowing is arguably the
+      better measure — a term prominent enough elsewhere to be extracted is stronger evidence
+      of cross-document importance than one that merely occurs — but it IS a narrowing, and
+      broadening it to raw text presence would change every node's `instructional_mass` and
+      therefore every exam allocation. Not changed unilaterally. If the plan's prose is what is
+      wanted, the change belongs in P2 together with a re-run of the coverage comparison.
+
+### Surfaced by the corrective pass, deliberately NOT done in it
+
+- [ ] **PPTX table cell text is not extracted.** A table shape has no `text_frame`, so it used
+      to be skipped entirely; it now contributes a `has_table` block with **empty text**. The
+      flag propagates, but the table's content is never chunked or embedded — so a node can be
+      flagged `has_table` with no table content available to ground a question. Pre-existing
+      MVP1 behaviour; fixing it is a content change, not a flag change.
+- [ ] **`ingest/chunk.py` keeps its own `_CHARS_PER_TOKEN = 4`**, a second copy of what is now
+      `config.CHARS_PER_TOKEN_ESTIMATE`. It governs chunk sizing rather than
+      `instructional_mass`, so unifying it would move chunk boundaries and change every
+      `chunk_id` — gate-visible, and it needs its own decision.
+- [ ] **P6: measure the flag heuristics on real course material.** `has_code` sees only
+      monospace font names; `has_equation` sees only math font names and math Unicode and is
+      blind to mathematics typeset as an image (no OCR in MVP1). On PPTX both font-name prongs
+      are blind whenever `run.font.name` is `None`, which is the common inherited-theme case.
+      Precision and recall are currently unmeasured.
+- [ ] **P2: check section C's candidate headroom on the real deck before trusting
+      `final_default`.** On the synthetic corpus, real ingest produced 32 nodes / 32 spans with
+      `has_figure: 3, has_table: 2, has_equation: 3, has_code: 2` — 6 candidate spans for
+      section C's 4 slots (1.5× headroom), `fill_ratio = 1.0`, nothing unfilled. A course deck
+      with two figures and no typed mathematics would starve section C on **material**, not on
+      scheduling.
 
 ---
 

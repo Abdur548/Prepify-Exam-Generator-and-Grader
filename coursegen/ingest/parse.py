@@ -2,12 +2,32 @@
 Document parsing: PDF (PyMuPDF) and PPTX (python-pptx) → TextBlock list.
 
 Zero LLM calls. Zero heading decisions — that is structure.py's job.
-This module only extracts blocks and records their font metadata.
+This module extracts blocks, records their font metadata, and sets the per-block
+content flags that coursemap.py ORs up into `NodeFlags`.
+
+Content flags — what is a detector and what is a heuristic:
+
+  has_table    DETECTED. PDF: `page.find_tables()`, present in the pinned PyMuPDF
+               (1.27.2); a text block whose bbox intersects a detected table's bbox
+               is marked. PPTX: `shape.has_table`, which is exact.
+  has_code     HEURISTIC. Monospace font name only (config.MONOSPACE_FONT_SUBSTRINGS).
+               Prose set in a monospace face is a false positive; code set in a
+               proportional face is a false negative. There is no lexical or
+               syntactic analysis, and nothing in the pinned stack offers one.
+  has_equation HEURISTIC. Either a dedicated mathematics font family
+               (config.MATH_FONT_SUBSTRINGS) or at least
+               config.EQUATION_MIN_MATH_CHARS characters drawn from
+               config.MATH_UNICODE_RANGES in the block's text. Mathematics typeset
+               as an *image* — common in scanned notes and exported slides — is
+               invisible to both prongs, and MVP1 has no OCR, so it is a false
+               negative. Both prongs are deliberately conservative; config.py records
+               which font names and Unicode blocks were excluded and why.
 """
 from __future__ import annotations
 
 import logging
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -28,6 +48,10 @@ class TextBlock:
     span_font_sizes: list[float]    # all individual span sizes; empty for figures
     source_file: str                # filename only — not full path (S4, node_id stability)
     is_slide_heading: bool = False  # True for PPTX placeholder types 1 / 3 only
+    # Content flags. See the module docstring for detector-vs-heuristic status.
+    has_table: bool = False
+    has_code: bool = False
+    has_equation: bool = False
 
 
 @dataclass
@@ -57,6 +81,20 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
     """
     Parse all PDF/PPTX files in source_dir.
     One bad file logs an error and is skipped; the batch always completes (R3).
+
+    Each file is parsed under a config.PARSE_TIMEOUT_SECONDS watchdog (S3), so one
+    pathological document cannot hang the whole ingest. A file that overruns is
+    logged as failed and skipped, exactly like one that raises.
+
+    LIMITATION — this is batch isolation, NOT preemption. `signal.alarm` is
+    Unix-only, so the watchdog is a `ThreadPoolExecutor.result(timeout=...)`, and a
+    Python thread cannot be forcibly killed. On timeout the batch moves on, but the
+    abandoned parse keeps running in the background, still holding its CPU and memory;
+    because executor workers are non-daemon threads it can also delay interpreter
+    shutdown at the end of the run. What the requirement buys is that one bad file
+    never blocks the others — not that its cost stops being paid. `multiprocessing`
+    would give real preemption and is deliberately not used: it collides with
+    Qdrant's exclusive file lock (S8) and adds complexity the project prohibits.
     """
     candidates = sorted(
         p for p in source_dir.iterdir()
@@ -68,7 +106,7 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
     docs: list[ParsedDocument] = []
     for path in candidates:
         try:
-            doc = parse_file(path)
+            doc = _parse_file_with_timeout(path)
             docs.append(doc)
             logger.info(
                 "Parsed %s: %d blocks on %d pages",
@@ -78,6 +116,31 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
             logger.error("Failed to parse %s — skipping: %s", path.name, exc)
 
     return docs
+
+
+def _parse_file_with_timeout(path: Path) -> ParsedDocument:
+    """
+    Run `parse_file(path)` under the S3 per-file watchdog.
+
+    Raises TimeoutError once the parse overruns config.PARSE_TIMEOUT_SECONDS. The
+    worker thread is left running — see the limitation note in `parse_directory`.
+    A fresh single-worker executor per file means the abandoned thread never starves
+    the next file of a worker slot.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="parse")
+    try:
+        future = executor.submit(parse_file, path)
+        try:
+            return future.result(timeout=config.PARSE_TIMEOUT_SECONDS)
+        except FuturesTimeoutError as exc:
+            raise TimeoutError(
+                f"{path.name}: parse exceeded PARSE_TIMEOUT_SECONDS="
+                f"{config.PARSE_TIMEOUT_SECONDS}; abandoned (the worker thread cannot "
+                "be killed and continues until process exit)"
+            ) from exc
+    finally:
+        # wait=False: never block the batch on the thread we just abandoned.
+        executor.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +167,7 @@ def _parse_pdf(path: Path) -> ParsedDocument:
 
     for page_idx in range(doc.page_count):
         page = doc[page_idx]
+        table_bboxes = _find_table_bboxes(page, page_idx, path.name, warnings)
         page_dict = page.get_text("dict")
         page_has_content = False
 
@@ -122,6 +186,7 @@ def _parse_pdf(path: Path) -> ParsedDocument:
             elif raw_block["type"] == 0:                 # text block
                 span_texts: list[str] = []
                 span_sizes: list[float] = []
+                span_fonts: list[str] = []
                 for line in raw_block.get("lines", []):
                     for span in line.get("spans", []):
                         t = span.get("text", "").strip()
@@ -130,6 +195,9 @@ def _parse_pdf(path: Path) -> ParsedDocument:
                             size = span.get("size", 0.0)
                             if size > 0:
                                 span_sizes.append(size)
+                            font = span.get("font", "")
+                            if font:
+                                span_fonts.append(font)
 
                 if not span_texts:
                     continue
@@ -143,6 +211,11 @@ def _parse_pdf(path: Path) -> ParsedDocument:
                     max_font_size=max_size,
                     span_font_sizes=span_sizes,
                     source_file=source_file,
+                    has_table=_bbox_intersects_any(
+                        raw_block.get("bbox"), table_bboxes
+                    ),
+                    has_code=is_code_font(span_fonts),
+                    has_equation=is_equation_content(span_fonts, text),
                 ))
                 page_has_content = True
 
@@ -172,7 +245,7 @@ def _parse_pdf(path: Path) -> ParsedDocument:
 
 def _parse_pptx(path: Path) -> ParsedDocument:
     from pptx import Presentation
-    from pptx.enum.shapes import PP_PLACEHOLDER
+    from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 
     _check_pptx_zip_size(path)
 
@@ -200,8 +273,27 @@ def _parse_pptx(path: Path) -> ParsedDocument:
         slide_has_content = False
 
         for shape in slide.shapes:
+            if shape.has_table:
+                # Exact, not a heuristic: python-pptx models a table shape directly.
+                # The cell text is NOT extracted (MVP1) — this block exists so the
+                # section carries has_table through to NodeFlags.
+                blocks.append(TextBlock(
+                    block_type="text",
+                    text="",
+                    page=slide_idx,
+                    max_font_size=0.0,
+                    span_font_sizes=[],
+                    source_file=source_file,
+                    has_table=True,
+                ))
+                slide_has_content = True
+                continue
+
             if not shape.has_text_frame:
-                if hasattr(shape, "shape_type") and shape.shape_type == 13:  # picture
+                if (
+                    hasattr(shape, "shape_type")
+                    and shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+                ):
                     blocks.append(TextBlock(
                         block_type="figure",
                         text="",
@@ -214,11 +306,18 @@ def _parse_pptx(path: Path) -> ParsedDocument:
                 continue
 
             parts: list[str] = []
+            run_fonts: list[str] = []
             for para in shape.text_frame.paragraphs:
                 for run in para.runs:
                     t = run.text.strip()
                     if t:
                         parts.append(t)
+                        # None whenever the run inherits its face from the layout or
+                        # theme, which is the common case — the font-name prong of the
+                        # code/equation heuristics is simply blind on those runs.
+                        font_name = run.font.name
+                        if font_name:
+                            run_fonts.append(font_name)
 
             if not parts:
                 continue
@@ -228,14 +327,17 @@ def _parse_pptx(path: Path) -> ParsedDocument:
                 and shape.placeholder_format is not None
                 and shape.placeholder_format.type in _HEADING_TYPES
             )
+            shape_text = " ".join(parts)
             blocks.append(TextBlock(
                 block_type="text",
-                text=" ".join(parts),
+                text=shape_text,
                 page=slide_idx,
                 max_font_size=0.0,      # not used for PPTX heading detection
                 span_font_sizes=[],
                 source_file=source_file,
                 is_slide_heading=is_heading,
+                has_code=is_code_font(run_fonts),
+                has_equation=is_equation_content(run_fonts, shape_text),
             ))
             slide_has_content = True
 
@@ -249,6 +351,104 @@ def _parse_pptx(path: Path) -> ParsedDocument:
         page_count=slide_count,
         warnings=warnings,
     )
+
+
+# ---------------------------------------------------------------------------
+# Content flag heuristics
+#
+# Public because the tests exercise them directly: the font-name prong of
+# has_equation cannot be driven end-to-end through a synthetic PDF (PyMuPDF's
+# base-14 fonts substitute U+00B7 for every mathematical glyph and cannot embed a
+# CMMI/Cambria-Math face without an external font file), so the unit is the seam
+# that gets tested.
+# ---------------------------------------------------------------------------
+
+def is_code_font(font_names: list[str]) -> bool:
+    """
+    HEURISTIC: True if any font name looks monospace.
+
+    Monospace is the whole signal — there is no lexical or syntactic analysis here
+    and nothing in the pinned stack provides one. Prose set in a monospace face is a
+    false positive; code set in a proportional face is a false negative.
+    """
+    return any(
+        sub in name.lower()
+        for name in font_names
+        for sub in config.MONOSPACE_FONT_SUBSTRINGS
+    )
+
+
+def is_math_font(font_names: list[str]) -> bool:
+    """HEURISTIC: True if any font name is a dedicated mathematics family."""
+    return any(
+        sub in name.lower()
+        for name in font_names
+        for sub in config.MATH_FONT_SUBSTRINGS
+    )
+
+
+def count_math_chars(text: str) -> int:
+    """Number of characters in *text* drawn from config.MATH_UNICODE_RANGES."""
+    total = 0
+    for ch in text:
+        cp = ord(ch)
+        if any(lo <= cp <= hi for lo, hi in config.MATH_UNICODE_RANGES):
+            total += 1
+    return total
+
+
+def is_equation_content(font_names: list[str], text: str) -> bool:
+    """
+    HEURISTIC: True if the block is set in a mathematics font, OR carries at least
+    config.EQUATION_MIN_MATH_CHARS characters from config.MATH_UNICODE_RANGES.
+
+    Neither prong sees mathematics that was typeset as an image, and MVP1 has no
+    OCR — a scanned or picture-exported equation is a false negative.
+    """
+    if is_math_font(font_names):
+        return True
+    return count_math_chars(text) >= config.EQUATION_MIN_MATH_CHARS
+
+
+def _find_table_bboxes(
+    page: object,
+    page_idx: int,
+    file_name: str,
+    warnings: list[str],
+) -> list[tuple[float, float, float, float]]:
+    """
+    Bounding boxes of the tables PyMuPDF detects on *page*.
+
+    Table detection is layout analysis over a third-party parse and can raise on
+    unusual page content. That must not lose a whole 200-page document, so a failure
+    degrades this one page to "no tables" and is recorded in ParsedDocument.warnings
+    — visible in the ingest report, never swallowed.
+    """
+    try:
+        finder = page.find_tables()
+    except Exception as exc:
+        msg = (
+            f"Table detection failed on page {page_idx + 1} of {file_name}: {exc}. "
+            "has_table may be under-reported for this page."
+        )
+        logger.warning(msg)
+        warnings.append(msg)
+        return []
+    return [tuple(t.bbox) for t in finder.tables]
+
+
+def _bbox_intersects_any(
+    bbox: object,
+    others: list[tuple[float, float, float, float]],
+) -> bool:
+    """True if *bbox* overlaps any rectangle in *others*. Both are (x0, y0, x1, y1)."""
+    if not bbox or not others:
+        return False
+    ax0, ay0, ax1, ay1 = bbox
+    for bx0, by0, bx1, by1 in others:
+        if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
