@@ -1,7 +1,11 @@
 """P0 gate tests: all five Pydantic contracts instantiate and round-trip correctly."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
+from pydantic import ValidationError
 
 from coursegen.contracts.blueprint import Blueprint, SectionSpec
 from coursegen.contracts.course_map import CourseMapNode, NodeFlags
@@ -46,8 +50,8 @@ class TestBlueprint:
     def test_roundtrip(self) -> None:
         bp = Blueprint(
             blueprint_id="midterm_default",
+            total_marks=60,        # 20*2 + 5*4 — must match the sections below
             title="Midterm Exam",
-            total_marks=100,
             duration_minutes=120,
             sections=[
                 SectionSpec(
@@ -142,6 +146,9 @@ class TestCoverageReport:
             nodes_total=20,
             nodes_covered=18,
             coverage_ratio=0.9,
+            slots_total=25,
+            slots_filled=25,
+            fill_ratio=1.0,
             mass_covered=0.87,
             per_node=[
                 NodeCoverage(
@@ -164,6 +171,9 @@ class TestCoverageReport:
             nodes_total=5,
             nodes_covered=3,
             coverage_ratio=0.6,
+            slots_total=5,
+            slots_filled=3,
+            fill_ratio=0.6,
             mass_covered=0.55,
             per_node=[],
             unfilled_slots=["A-04", "A-05"],
@@ -171,3 +181,166 @@ class TestCoverageReport:
         )
         assert len(report.unfilled_slots) == 2
         assert len(report.warnings) == 1
+
+
+
+class TestSectionSpecValidation:
+    def test_empty_bloom_is_rejected(self) -> None:
+        """allocate.py cycles bloom with `bloom_list[idx % len(bloom_list)]`,
+        so an empty list would be a ZeroDivisionError at solve time."""
+        with pytest.raises(ValidationError):
+            SectionSpec(
+                section_id="A",
+                title="Multiple Choice",
+                item_type="mcq",
+                count=5,
+                marks_each=2,
+                bloom=[],
+                options_count=4,
+            )
+
+    def test_single_bloom_is_accepted(self) -> None:
+        sec = SectionSpec(
+            section_id="A",
+            title="Multiple Choice",
+            item_type="mcq",
+            count=5,
+            marks_each=2,
+            bloom=["remember"],
+            options_count=4,
+        )
+        assert sec.bloom == ["remember"]
+
+
+class TestBlueprintMarksValidation:
+    def test_marks_mismatch_is_rejected(self) -> None:
+        """A blueprint must not print 'Total: 100 marks' over a 95-mark paper."""
+        with pytest.raises(ValidationError) as exc:
+            Blueprint(
+                blueprint_id="bad_marks",
+                title="Mismatched",
+                total_marks=100,
+                duration_minutes=120,
+                sections=[
+                    SectionSpec(
+                        section_id="A",
+                        title="Multiple Choice",
+                        item_type="mcq",
+                        count=20,
+                        marks_each=2,      # 40, not 100
+                        bloom=["remember"],
+                        options_count=4,
+                    )
+                ],
+            )
+        message = str(exc.value)
+        assert "40" in message and "100" in message
+
+    def test_marks_match_is_accepted(self) -> None:
+        bp = Blueprint(
+            blueprint_id="good_marks",
+            title="Matched",
+            total_marks=40,
+            duration_minutes=60,
+            sections=[
+                SectionSpec(
+                    section_id="A",
+                    title="Multiple Choice",
+                    item_type="mcq",
+                    count=20,
+                    marks_each=2,
+                    bloom=["remember"],
+                    options_count=4,
+                )
+            ],
+        )
+        assert bp.total_marks == 40
+
+    @pytest.mark.parametrize(
+        "name", ["midterm_default", "final_default", "quiz_default"]
+    )
+    def test_shipped_blueprints_validate(self, name: str) -> None:
+        """The three shipped blueprints are arithmetically correct and must stay so."""
+        path = (
+            Path(__file__).parent.parent
+            / "coursegen" / "exam" / "blueprints" / f"{name}.json"
+        )
+        bp = Blueprint.model_validate(json.loads(path.read_text()))
+        assert sum(s.count * s.marks_each for s in bp.sections) == bp.total_marks
+
+
+class TestGeneratedItemValidation:
+    """P3's first validation gate is a Pydantic parse of GeneratedItem. It has to
+    reject something, or it gates nothing."""
+
+    def test_options_without_correct_option_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GeneratedItem(
+                slot_id="A-01",
+                stem="Which of the following best describes X?",
+                options=[
+                    MCQOption(label="A", text="Option one"),
+                    MCQOption(label="B", text="Option two"),
+                ],
+                correct_option=None,
+                model_answer="Option one is correct.",
+                explanation="X is defined as ...",
+                source_ref=SourceRef(file="lecture.pdf", pages=[3]),
+            )
+
+    def test_correct_option_not_matching_a_label_is_rejected(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            GeneratedItem(
+                slot_id="A-02",
+                stem="Which of the following best describes X?",
+                options=[
+                    MCQOption(label="A", text="Option one"),
+                    MCQOption(label="B", text="Option two"),
+                ],
+                correct_option="C",      # no such label
+                model_answer="Option one is correct.",
+                explanation="X is defined as ...",
+                source_ref=SourceRef(file="lecture.pdf", pages=[3]),
+            )
+        assert "correct_option" in str(exc.value)
+
+    def test_correct_option_without_options_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GeneratedItem(
+                slot_id="B-01",
+                stem="Explain the concept of X.",
+                options=None,
+                correct_option="A",
+                model_answer="X is ...",
+                explanation="See page 5.",
+                source_ref=SourceRef(file="notes.pdf", pages=[5]),
+            )
+
+    def test_well_formed_mcq_is_accepted(self) -> None:
+        item = GeneratedItem(
+            slot_id="A-03",
+            stem="Which of the following best describes X?",
+            options=[
+                MCQOption(label="A", text="Option one"),
+                MCQOption(label="B", text="Option two"),
+                MCQOption(label="C", text="Option three"),
+                MCQOption(label="D", text="Option four"),
+            ],
+            correct_option="C",
+            model_answer="Option three is correct because ...",
+            explanation="X is defined as ...",
+            source_ref=SourceRef(file="lecture.pdf", pages=[3, 4]),
+        )
+        assert item.correct_option == "C"
+
+    def test_well_formed_short_answer_is_accepted(self) -> None:
+        item = GeneratedItem(
+            slot_id="B-02",
+            stem="Explain the concept of X.",
+            options=None,
+            correct_option=None,
+            model_answer="X is ...",
+            explanation="See page 5.",
+            source_ref=SourceRef(file="notes.pdf", pages=[5]),
+        )
+        assert item.options is None

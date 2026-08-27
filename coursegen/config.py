@@ -26,6 +26,12 @@ HEADING_STD_FACTOR: float = 1.5
 HEADING_MAX_BLOCK_PCT: float = 0.30   # gate: <30% of blocks classified as headings
 OCR_DPI: int = 150
 
+# Serialisation policy for course_map.json. P1's gate is "identical course_map.json
+# hash across two ingests", which is unachievable without a fixed float-rounding and
+# key-ordering policy: raw float repr and dict insertion order both vary.
+COURSE_MAP_FLOAT_PRECISION: int = 6   # decimal places instructional_mass is rounded to before serialisation
+JSON_SORT_KEYS: bool = True           # deterministic key order when persisting JSON
+
 # ---------------------------------------------------------------------------
 # Security / parser limits (S3)
 # ---------------------------------------------------------------------------
@@ -48,6 +54,10 @@ EMBEDDING_BATCH_SIZE: int = 32
 RETRIEVE_TOP_K: int = 10
 RERANK_TOP_K: int = 5
 SEND_TOP_K: int = 4                  # L9: retrieve 10, rerank to 5, send 4
+# UNIT: raw cross-encoder logit, NOT a 0-1 similarity. ms-marco-MiniLM-L-6-v2 emits
+# unbounded logits (roughly -11 to +11). This value is UNCALIBRATED — it was chosen as
+# though it were a probability. It must be set from measured logits at P4 before it
+# means anything. Do not adjust it without measurement.
 RERANKER_THRESHOLD: float = 0.5
 RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
@@ -62,8 +72,11 @@ YAKE_TOP_N: int = 10
 # Exam generation
 # ---------------------------------------------------------------------------
 BATCH_SIZE: int = 6                  # item specs per LLM call
-GROUNDEDNESS_TAU: float = 0.45       # cross-encoder threshold for validation gate
-DEDUP_TAU: float = 0.85              # cosine similarity ceiling for dedup gate
+# UNIT: raw cross-encoder logit from ms-marco-MiniLM-L-6-v2 (unbounded, roughly
+# -11 to +11), NOT a 0-1 similarity. UNCALIBRATED — must be set from measured logits
+# at P3 before it means anything. Do not adjust it without measurement.
+GROUNDEDNESS_TAU: float = 0.45
+DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
 OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length
 MCQ_SHUFFLE_SEED: int = 42
 MAX_REGENERATION_PASSES: int = 1     # R5: cap enforced in code, not just comment

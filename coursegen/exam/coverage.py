@@ -14,6 +14,7 @@ def build_report(
     node_marks_map: dict[str, int],
     unfilled_slots: list[str],
     warnings: list[str],
+    slots_total: int,
 ) -> CoverageReport:
     covered_ids = set(node_slot_map.keys())
     nodes_total = len(course_map)
@@ -22,6 +23,11 @@ def build_report(
     mass_covered = sum(
         n.instructional_mass for n in course_map if n.node_id in covered_ids
     )
+
+    # coverage_ratio counts nodes TOUCHED. It reads 1.00 on a paper that is missing
+    # four questions. fill_ratio is what proves the paper is actually complete.
+    slots_filled = slots_total - len(unfilled_slots)
+    fill_ratio = slots_filled / slots_total if slots_total > 0 else 0.0
 
     per_node = [
         NodeCoverage(
@@ -39,6 +45,9 @@ def build_report(
         nodes_total=nodes_total,
         nodes_covered=nodes_covered,
         coverage_ratio=coverage_ratio,
+        slots_total=slots_total,
+        slots_filled=slots_filled,
+        fill_ratio=fill_ratio,
         mass_covered=mass_covered,
         per_node=per_node,
         unfilled_slots=unfilled_slots,
