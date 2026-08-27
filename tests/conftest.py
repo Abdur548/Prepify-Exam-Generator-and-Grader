@@ -275,7 +275,13 @@ def math_pptx(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
     slide = prs.slides.add_slide(title_only_layout)
     slide.shapes.title.text = "Benchmark Results"
-    slide.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(4), Inches(1))
+    bench = slide.shapes.add_table(
+        2, 2, Inches(1), Inches(2), Inches(4), Inches(1)
+    ).table
+    bench.cell(0, 0).text = "Model"
+    bench.cell(0, 1).text = "Accuracy"
+    bench.cell(1, 0).text = "Baseline"
+    bench.cell(1, 1).text = "0.71"
 
     slide = prs.slides.add_slide(title_only_layout)
     slide.shapes.title.text = "Architecture Diagram"
@@ -365,7 +371,13 @@ def rich_source_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         elif idx == 4:
             slide = prs.slides.add_slide(title_only_layout)
             slide.shapes.title.text = "Measured Results"
-            slide.shapes.add_table(2, 3, Inches(1), Inches(2), Inches(5), Inches(1))
+            results = slide.shapes.add_table(
+                2, 3, Inches(1), Inches(2), Inches(5), Inches(1)
+            ).table
+            for col, header in enumerate(("Method", "Latency", "Throughput")):
+                results.cell(0, col).text = header
+            for col, value in enumerate(("Batched", "42 ms", "980 rps")):
+                results.cell(1, col).text = value
         elif idx == 5:
             slide = prs.slides.add_slide(title_only_layout)
             slide.shapes.title.text = "System Diagram"

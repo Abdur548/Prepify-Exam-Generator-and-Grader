@@ -96,7 +96,11 @@ Known false modes, stated rather than buried:
   from the Unicode ranges for the same reason — `config.py` records each exclusion.
 - Both font-name prongs are blind on PPTX runs that inherit their face from the layout or
   theme, which is the common case (`run.font.name` is then `None`).
-- PPTX table **cell text is not extracted** (MVP1); the block exists only to carry the flag.
+- PPTX table **cell text is extracted** row-major: cells joined by `" | "`, rows by newline, so
+  a row's associations survive into the grounding span. Cells covered by a merge are skipped
+  (`cell.is_spanned`) — python-pptx returns the merged text on the origin cell and `""` at every
+  spanned position, so a naive rows/cells walk emits a stray blank cell per merge. Table text
+  counts toward `token_count`, so tables now contribute to `instructional_mass`.
 
 #### `instructional_mass`
 
@@ -177,14 +181,17 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 |---|---|---|---|---|
 | 2026-08-27 | P0 initial | Created all five contracts, `config.py`, `llm/client.py`, living docs | P0 foundation | P0 |
 | 2026-08-27 | P2' solver | `exam/allocate.py`, `exam/coverage.py`, 3 blueprints, 20-node fixture | Solver before ingest to de-risk schedule | P2' |
-| 2026-08-27 | (uncommitted) | `CoverageReport` gains `slots_total` / `slots_filled` / `fill_ratio` | `coverage_ratio` reported 1.00 on a paper missing 4 of 22 questions | P2' fix |
-| 2026-08-27 | (uncommitted) | Sections solved most-constrained-first, emitted in blueprint order | Flag-filtered sections were span-starved by unconstrained sections solved earlier | P2' fix |
-| 2026-08-27 | (uncommitted) | `spec_hash` includes `marks` and `options_count` | Cross-paper cache collision between a 4-mark and a 5-mark item on the same node+span | P2' fix |
-| 2026-08-27 | (uncommitted) | `SectionSpec.bloom` min_length=1; `Blueprint` marks-sum validator; `GeneratedItem` options/correct_option validator | Contracts that parsed invalid data cleanly | P2' fix |
-| 2026-08-27 | (uncommitted) | `COURSE_MAP_FLOAT_PRECISION`, `JSON_SORT_KEYS`; unit comments on `RERANKER_THRESHOLD` / `GROUNDEDNESS_TAU` | P1's identical-hash gate needs a rounding + key-order policy; both thresholds are raw logits, not similarities | P2' fix |
+| 2026-08-27 | 9b6bc9c | `CoverageReport` gains `slots_total` / `slots_filled` / `fill_ratio` | `coverage_ratio` reported 1.00 on a paper missing 4 of 22 questions | P2' fix |
+| 2026-08-27 | 9b6bc9c | Sections solved most-constrained-first, emitted in blueprint order | Flag-filtered sections were span-starved by unconstrained sections solved earlier | P2' fix |
+| 2026-08-27 | 9b6bc9c | `spec_hash` includes `marks` and `options_count` | Cross-paper cache collision between a 4-mark and a 5-mark item on the same node+span | P2' fix |
+| 2026-08-27 | 9b6bc9c | `SectionSpec.bloom` min_length=1; `Blueprint` marks-sum validator; `GeneratedItem` options/correct_option validator | Contracts that parsed invalid data cleanly | P2' fix |
+| 2026-08-27 | 9b6bc9c | `COURSE_MAP_FLOAT_PRECISION`, `JSON_SORT_KEYS`; unit comments on `RERANKER_THRESHOLD` / `GROUNDEDNESS_TAU` | P1's identical-hash gate needs a rounding + key-order policy; both thresholds are raw logits, not similarities | P2' fix |
 | 2026-08-27 | 029b504 | Full ingest: `parse` / `structure` / `chunk` / `embed` / `index` / `coursemap` | P1 | P1 |
-| 2026-08-27 | (uncommitted) | `has_table` detected, `has_code` + `has_equation` implemented heuristically | Three of four `NodeFlags` were hardcoded `False`, so `final_default.json` section C silently degraded to figure-only | P1 fix |
-| 2026-08-27 | (uncommitted) | `PARSE_TIMEOUT_SECONDS` actually applied, via a thread watchdog in `parse_directory` | The constant was defined and used nowhere; S3 requires a per-file timeout | P1 fix |
-| 2026-08-27 | (uncommitted) | `CHARS_PER_TOKEN_ESTIMATE` in config; `MSO_SHAPE_TYPE.PICTURE` replaces `shape_type == 13` | Two magic numbers, one of them feeding `instructional_mass` | P1 fix |
-| 2026-08-27 | (uncommitted) | `df_other` docstring corrected to describe key-term salience | The doc claimed raw text presence; the code has always measured YAKE key-term salience. Code is truth, doc was wrong | P1 fix |
-| 2026-08-27 | (uncommitted) | Real-Qdrant point-count test; ingest→solver integration test | The P1 gate's point-count condition and the fixture-vs-reality seam were both untested | P1 fix |
+| 2026-08-27 | 2922d3f | `has_table` detected, `has_code` + `has_equation` implemented heuristically | Three of four `NodeFlags` were hardcoded `False`, so `final_default.json` section C silently degraded to figure-only | P1 fix |
+| 2026-08-27 | 2922d3f | `PARSE_TIMEOUT_SECONDS` actually applied, via a thread watchdog in `parse_directory` | The constant was defined and used nowhere; S3 requires a per-file timeout | P1 fix |
+| 2026-08-27 | 2922d3f | `CHARS_PER_TOKEN_ESTIMATE` in config; `MSO_SHAPE_TYPE.PICTURE` replaces `shape_type == 13` | Two magic numbers, one of them feeding `instructional_mass` | P1 fix |
+| 2026-08-27 | 2922d3f | `df_other` docstring corrected to describe key-term salience | The doc claimed raw text presence; the code has always measured YAKE key-term salience. Code is truth, doc was wrong | P1 fix |
+| 2026-08-27 | 2922d3f | Real-Qdrant point-count test; ingest→solver integration test | The P1 gate's point-count condition and the fixture-vs-reality seam were both untested | P1 fix |
+| 2026-08-27 | this commit | PPTX table cell text extracted (merge-aware); table text counts toward `token_count` | A `has_table` node carried no table content to ground a question in; both PPTX fixtures held empty tables, so the gap survived review | P1 follow-up |
+| 2026-08-27 | this commit | `df_other` key-term-salience narrowing confirmed as intended | Human decision — the code was right and the plan's prose was the imprecise half | P1 follow-up |
+| 2026-08-27 | this commit | `TestParseTimeout` threshold 0.2s → 1.0s | Real parse is 50–96 ms, so ~2× headroom; under suite load the healthy file timed out too and the gate failed intermittently | P1 follow-up |

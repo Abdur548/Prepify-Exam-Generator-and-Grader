@@ -544,6 +544,57 @@ class TestPPTXContentFlags:
             "shape.has_table did not produce a has_table block"
         )
 
+    def test_table_cell_text_extracted(self, math_pptx: Path) -> None:
+        """
+        A has_table node with empty text can be allocated a question it has no
+        content to ground — the flag says "there is a table here" while the span
+        hands the model nothing. Cell text must reach the block.
+        """
+        doc = parse_file(math_pptx)
+        table_blocks = [b for b in doc.blocks if b.has_table]
+        assert table_blocks, "no has_table block emitted"
+        text = table_blocks[0].text
+        for expected in ("Model", "Accuracy", "Baseline", "0.71"):
+            assert expected in text, f"{expected!r} missing from table text: {text!r}"
+
+    def test_table_text_preserves_cell_boundaries(self, math_pptx: Path) -> None:
+        """Row associations survive: 'Baseline | 0.71', not 'Baseline 0.71'."""
+        doc = parse_file(math_pptx)
+        text = next(b.text for b in doc.blocks if b.has_table)
+        assert " | " in text, f"cell boundaries flattened away: {text!r}"
+
+    def test_merged_cells_do_not_emit_blank_cells(self, tmp_path: Path) -> None:
+        """
+        python-pptx puts merged text on the origin cell and returns "" at every
+        spanned position, so iterating rows/cells naively emits a stray blank cell
+        per merge — surfacing as an empty segment between two separators.
+        """
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        table = slide.shapes.add_table(
+            2, 3, Inches(1), Inches(1), Inches(6), Inches(1)
+        ).table
+        table.cell(0, 0).text = "Algorithm"
+        table.cell(0, 1).text = "Complexity"
+        table.cell(1, 0).text = "QuickSort"
+        table.cell(1, 1).text = "O(n log n)"
+        table.cell(0, 1).merge(table.cell(0, 2))
+
+        path = tmp_path / "merged.pptx"
+        prs.save(str(path))
+
+        doc = parse_file(path)
+        text = next(b.text for b in doc.blocks if b.has_table)
+        assert "Algorithm" in text and "QuickSort" in text
+        assert "|  |" not in text, f"blank cell from a merged position: {text!r}"
+        for line in text.splitlines():
+            assert not line.strip().endswith("|"), (
+                f"dangling separator from a merged position: {line!r}"
+            )
+
     def test_math_unicode_slide_flagged(self, math_pptx: Path) -> None:
         doc = parse_file(math_pptx)
         assert any(b.has_equation for b in doc.blocks), (
@@ -573,6 +624,17 @@ class TestPPTXContentFlags:
 # S3 — per-file parse timeout (PARSE_TIMEOUT_SECONDS)
 # ---------------------------------------------------------------------------
 
+# The timeout these tests install must be comfortably longer than a real parse,
+# because only the deliberately-blocked file is supposed to trip it. A real
+# parse_file on the native fixture measures 50–96 ms (find_tables() dominates), so
+# the original 0.2 s left ~2x headroom — under full-suite CPU contention the *good*
+# file timed out as well, parse_directory returned nothing, and the assertion failed
+# intermittently. 1.0 s is ~10x the observed worst case. The blocked file waits on an
+# Event, so it trips the watchdog at any threshold; raising this cannot mask a real
+# failure, it only stops the healthy file from racing the clock.
+_TIMEOUT_TEST_SECONDS = 1.0
+
+
 class TestParseTimeout:
     def test_slow_file_is_skipped_and_batch_completes(
         self, native_pdf: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -593,7 +655,7 @@ class TestParseTimeout:
         shutil.copy(native_pdf, source_dir / "good.pdf")
         shutil.copy(native_pdf, source_dir / "slow.pdf")
 
-        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", _TIMEOUT_TEST_SECONDS)
         real_parse_file = parse_mod.parse_file
         release = threading.Event()
 
@@ -619,7 +681,7 @@ class TestParseTimeout:
         """The failure must be legible in the log, not an anonymous timeout."""
         from coursegen.ingest import parse as parse_mod
 
-        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", 0.2)
+        monkeypatch.setattr(config, "PARSE_TIMEOUT_SECONDS", _TIMEOUT_TEST_SECONDS)
         release = threading.Event()
 
         def never_finishes(path: Path):

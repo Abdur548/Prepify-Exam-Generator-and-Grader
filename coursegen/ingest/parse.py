@@ -243,6 +243,14 @@ def _parse_pdf(path: Path) -> ParsedDocument:
 # PPTX via python-pptx
 # ---------------------------------------------------------------------------
 
+# Table cell/row joiners. Cell boundaries are preserved rather than flattened to
+# spaces because the chunk text is what an item is later grounded in — "QuickSort
+# | O(n log n)" keeps the row's association readable, "QuickSort O(n log n)" does
+# not. Text, not markup: S5 requires model-facing content to stay inert.
+_TABLE_CELL_SEP = " | "
+_TABLE_ROW_SEP = "\n"
+
+
 def _parse_pptx(path: Path) -> ParsedDocument:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
@@ -275,16 +283,50 @@ def _parse_pptx(path: Path) -> ParsedDocument:
         for shape in slide.shapes:
             if shape.has_table:
                 # Exact, not a heuristic: python-pptx models a table shape directly.
-                # The cell text is NOT extracted (MVP1) — this block exists so the
-                # section carries has_table through to NodeFlags.
+                table = shape.table
+                table_rows: list[str] = []
+                cell_fonts: list[str] = []
+
+                for r_idx in range(len(table.rows)):
+                    cells: list[str] = []
+                    for c_idx in range(len(table.columns)):
+                        cell = table.cell(r_idx, c_idx)
+                        # Skip positions covered by a merge. python-pptx puts the
+                        # merged text on the origin cell and returns "" at every
+                        # spanned position, so iterating rows/cells naively emits a
+                        # stray blank cell for each one.
+                        if cell.is_spanned:
+                            continue
+                        # Collapse intra-cell newlines so _TABLE_ROW_SEP stays
+                        # meaningful as the row boundary.
+                        cell_text = " ".join(cell.text.split())
+                        if cell_text:
+                            cells.append(cell_text)
+                        for para in cell.text_frame.paragraphs:
+                            for run in para.runs:
+                                font_name = run.font.name
+                                if font_name:
+                                    cell_fonts.append(font_name)
+                    if cells:
+                        table_rows.append(_TABLE_CELL_SEP.join(cells))
+
+                table_text = _TABLE_ROW_SEP.join(table_rows)
+                if not table_text:
+                    warnings.append(
+                        f"Slide {slide_idx + 1} of {path.name} has a table with no "
+                        f"cell text — has_table is set but the node carries no table "
+                        f"content to ground a question in."
+                    )
                 blocks.append(TextBlock(
                     block_type="text",
-                    text="",
+                    text=table_text,
                     page=slide_idx,
                     max_font_size=0.0,
                     span_font_sizes=[],
                     source_file=source_file,
                     has_table=True,
+                    has_code=is_code_font(cell_fonts),
+                    has_equation=is_equation_content(cell_fonts, table_text),
                 ))
                 slide_has_content = True
                 continue

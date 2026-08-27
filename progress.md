@@ -705,3 +705,64 @@ a socket.
 - PyMuPDF prints `Consider using the pymupdf_layout package…` to stdout the first time
   `find_tables()` runs. Cosmetic, library-owned, not suppressed.
 - `df_other`'s narrowing to key-term salience awaits the human's confirmation (`todo.md`).
+
+---
+
+## P1 follow-up — PPTX table content + flaky-gate fix
+
+**Date:** 2026-08-27 · **Trigger:** human review of the P1 corrective pass.
+
+**Built:**
+- `ingest/parse.py` — PPTX table **cell text** is now extracted. Previously a table shape
+  produced a `has_table` block with empty text, so a node could be flagged as containing a
+  table while handing the model nothing to ground a question in. Cells join with
+  `_TABLE_CELL_SEP` (`" | "`), rows with `_TABLE_ROW_SEP`, so row associations survive into
+  the span. Cells covered by a merge are skipped via `cell.is_spanned`: python-pptx puts the
+  merged text on the origin cell and returns `""` at each spanned position, so a naive
+  rows/cells loop emits a stray blank cell per merge. Cell runs feed the `has_code` /
+  `has_equation` heuristics; a table with no cell text now raises a warning.
+- `tests/conftest.py` — both PPTX fixtures were building **empty** tables, which is why the
+  gap survived review. They now carry real cell text.
+- `tests/test_p1_ingest.py` — 3 new tests (cell text extracted, cell boundaries preserved,
+  merged cells emit no blank cells) and a fix for a flaky test, below.
+
+**Deviations from spec:** none. `df_other` narrowing CONFIRMED by the human — the computation
+stands; the plan's prose was the imprecise half.
+
+**Flaky gate found and fixed (not caused by this change):**
+`TestParseTimeout` installed `PARSE_TIMEOUT_SECONDS = 0.2`, but a real `parse_file` on the
+native fixture measures 50–96 ms — roughly 2× headroom. Under full-suite CPU contention the
+*healthy* file timed out too, `parse_directory` returned nothing, and the assertion failed.
+It passed in isolation and on 3 of 4 full-suite runs, at both this commit and its parent.
+Replaced with `_TIMEOUT_TEST_SECONDS = 1.0` (~10× the measured worst case), the measurement
+recorded in a comment. The blocked file waits on an `Event`, so it trips the watchdog at any
+threshold — raising the value cannot mask a real failure.
+
+**Gate command:**
+```
+$ python -m pytest
+........................................................................ [ 57%]
+.....................................................                    [100%]
+125 passed in 13.60s
+```
+Run five consecutive times to prove the flake is gone: `125 passed` in 13.60s, 15.24s, 14.55s,
+15.40s, 15.23s.
+
+```
+$ python -m coursegen --dry-run
+=== No network calls were made ===   (exit 0)
+```
+**Result:** PASS
+
+**Post-phase verification:**
+- [x] PPTX table cell text reaches the block — `TestPPTXContentFlags::test_table_cell_text_extracted`
+- [x] Row associations preserved — `test_table_text_preserves_cell_boundaries`
+- [x] Merged cells emit no blank cells — `test_merged_cells_do_not_emit_blank_cells`
+- [x] Timeout gate no longer flaky — 5 consecutive green full-suite runs
+
+**Known issues carried forward:**
+- `ingest/chunk.py` still keeps its own `_CHARS_PER_TOKEN = 4`; unifying it would move chunk
+  boundaries and change every `chunk_id`. Logged, not done.
+- Table text now counts toward `token_count`, so tables contribute to `instructional_mass`
+  where before they contributed nothing. Intended, but it means any course map built before
+  this change has different weights — re-ingest rather than compare across the boundary.

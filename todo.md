@@ -179,7 +179,7 @@ From a senior review of `029b504`, whose PASS was premature. Full write-up in `p
 - [x] `progress.md` point-count gate line restored; `pipeline.md` Ingest stage written
 - [x] 31 new tests; 122 pass; both gates green; zero-network re-verified with sockets blocked
 
-### NEEDS HUMAN CONFIRMATION — `df_other` is narrower than the plan's prose
+### RESOLVED — `df_other` narrowing CONFIRMED by the human 2026-08-27
 
 The plan and the old docstring both said:
 
@@ -190,21 +190,43 @@ YAKE `key_terms`, so `df_other(t)` counts the other source files in which t was 
 **extracted as a key term**. A term present in another document's body but outside that
 document's top-N key terms contributes 0. It measures **salience**, not presence.
 
-- [ ] **Confirm or reject this narrowing.** The docstring now describes the implemented
-      behaviour; the computation was deliberately left alone. The narrowing is arguably the
-      better measure — a term prominent enough elsewhere to be extracted is stronger evidence
-      of cross-document importance than one that merely occurs — but it IS a narrowing, and
-      broadening it to raw text presence would change every node's `instructional_mass` and
-      therefore every exam allocation. Not changed unilaterally. If the plan's prose is what is
-      wanted, the change belongs in P2 together with a re-run of the coverage comparison.
+- [x] **CONFIRMED 2026-08-27: keep the narrowing.** `df_other` measures cross-document
+      *salience* — the other source files in which the term was itself extracted as a YAKE key
+      term — not raw text presence. This is the intended semantic. The docstring describes the
+      implemented behaviour and the computation stands as written. Do not "fix" it toward the
+      plan's original prose in a later phase; the plan's prose was the imprecise half.
+      Note the direction of the effect: salience is a stricter test than presence, so `df_other`
+      runs lower than the plan implied, the `(1 + ln(1 + mean_df))` multiplier stays nearer 1.0,
+      and `instructional_mass` sits closer to normalised `token_count` than the formula suggests
+      at a glance. Relevant when P6 compares this weighting against flat `token_count` — the two
+      arms are closer together than the formula makes them look.
 
 ### Surfaced by the corrective pass, deliberately NOT done in it
 
-- [ ] **PPTX table cell text is not extracted.** A table shape has no `text_frame`, so it used
-      to be skipped entirely; it now contributes a `has_table` block with **empty text**. The
-      flag propagates, but the table's content is never chunked or embedded — so a node can be
-      flagged `has_table` with no table content available to ground a question. Pre-existing
-      MVP1 behaviour; fixing it is a content change, not a flag change.
+- [x] **PPTX table cell text is now extracted** (done 2026-08-27, human-directed). A table
+      shape has no `text_frame`, so it used to contribute a `has_table` block with **empty
+      text** — the flag propagated while the table's content was never chunked or embedded, so
+      a node could be flagged `has_table` with nothing available to ground a question.
+      `_parse_pptx` now walks `shape.table` row-major, joining cells with `_TABLE_CELL_SEP`
+      (`" | "`) and rows with `_TABLE_ROW_SEP` so row associations survive into the grounding
+      span. Cells covered by a merge are skipped via `cell.is_spanned` — python-pptx puts the
+      merged text on the origin and returns `""` at every spanned position, so a naive
+      rows/cells loop emits a stray blank cell per merge. Cell runs also feed the `has_code` /
+      `has_equation` heuristics, and an empty table now raises a warning rather than passing
+      silently. Both PPTX fixtures were carrying *empty* tables, which is why the gap survived
+      review; they now carry real cell text.
+- [x] **Flaky timeout test fixed** (found 2026-08-27 while adding the table tests).
+      `TestParseTimeout` installed `PARSE_TIMEOUT_SECONDS = 0.2`, but a real `parse_file` on
+      the native fixture measures **50–96 ms** (`find_tables()` dominates) — only ~2x headroom.
+      Under full-suite CPU contention the *healthy* file timed out as well, `parse_directory`
+      returned nothing, and the assertion failed intermittently: it passed in isolation and on
+      3 of 4 full-suite runs. Now `_TIMEOUT_TEST_SECONDS = 1.0`, ~10x the observed worst case,
+      with the measurement recorded in a comment. The blocked file waits on an `Event` so it
+      trips the watchdog at any threshold — raising this cannot mask a real failure. Verified
+      5 consecutive green full-suite runs.
+      **Worth remembering:** a flaky gate is worse than a failing one here. The whole review
+      protocol rests on pasted test output meaning something, and a test that passes on retry
+      trains everyone to retry.
 - [ ] **`ingest/chunk.py` keeps its own `_CHARS_PER_TOKEN = 4`**, a second copy of what is now
       `config.CHARS_PER_TOKEN_ESTIMATE`. It governs chunk sizing rather than
       `instructional_mass`, so unifying it would move chunk boundaries and change every
