@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | P0 | Foundation | PASS | `pytest -q` + `python -m coursegen --dry-run` | 2026-08-27 |
 | P2′ | Solver on fixture | PASS | `pytest tests/test_p2prime_solver.py -v` | 2026-08-27 |
-| P1 | Ingest | NOT STARTED | | |
+| P1 | Ingest | PASS | `pytest tests/test_p1_ingest.py -v` | 2026-08-27 |
 | P2 | Solver on real data | NOT STARTED | | |
 | P3 | Generation + validation | NOT STARTED | | |
 | P4 | Render + chat | NOT STARTED | | |
@@ -155,7 +155,63 @@ tests\test_p2prime_solver.py ..................                          [100%]
 
 ---
 
-## Corrective pass on P0 / P2′ — 2026-08-27
+## P1 — Ingest
+
+**Built:**
+- `.gitattributes` — pins `*.json` to `eol=lf` (fixes course_map.json hash across platforms)
+- `ingest/parse.py` — PDF (PyMuPDF) + PPTX (python-pptx); figure blocks retained; security limits; OCR skipped with warning (MVP1 decision)
+- `ingest/structure.py` — relative font-size threshold (modal + 1.5σ); PPTX placeholder types 1/3; `heading_fraction()` for regression test
+- `ingest/chunk.py` — uuid5 content-addressed IDs; heading path prepended; 15% intra-section overlap
+- `ingest/embed.py` — BGE-M3 dense+sparse single forward pass; CUDA/MPS auto-detect (C6)
+- `ingest/index.py` — Qdrant named vectors (dense + sparse); idempotent upsert; `get_or_create_collection`
+- `ingest/coursemap.py` — full orchestrator; `instructional_mass` with bounded df formula; `COURSE_MAP_FLOAT_PRECISION` + `JSON_SORT_KEYS` for hash-stable JSON; `_compute_node_id` with source_file in hash
+- Updated `tests/conftest.py` — 5 session-scoped fixture PDFs/PPTX (native, slide, figure, malformed, pptx)
+- `tests/test_p1_ingest.py` — 27 tests
+
+**Files touched:**
+`.gitattributes`, `ingest/parse.py`, `ingest/structure.py`, `ingest/chunk.py`,
+`ingest/embed.py`, `ingest/index.py`, `ingest/coursemap.py`, `tests/conftest.py`,
+`tests/test_p1_ingest.py`
+
+**Deviations from spec:**
+- OCR: dropped in MVP1 — no OCR engine in pinned deps (confirmed decision in todo.md 2026-08-27). Pages with no text layer emit a warning, never a crash.
+- `has_table`, `has_equation`, `has_code` flags: always `False`. Only `has_figure` is implemented via image block detection. Accurate flag detection for tables/equations/code is deferred.
+
+**Gate command:**
+```
+$ python -m pytest tests/test_p1_ingest.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: E:\Qoder\prepify
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.12.0, mock-3.15.1
+collected 27 items
+
+tests\test_p1_ingest.py ...........................                      [100%]
+
+27 passed in 2.46s
+```
+**Result:** PASS
+
+**Full suite after P1:**
+```
+91 passed in 2.73s
+```
+**Result:** PASS (P0 and P2' tests unaffected)
+
+**Post-phase verification:**
+- [x] Ingest twice → identical node IDs — `TestIngestIdempotency::test_identical_node_ids_on_double_ingest`
+- [x] Ingest twice → identical course_map.json hash — `TestIngestIdempotency::test_identical_course_map_hash_on_double_ingest`
+- [x] Slide PDF: heading_fraction < 0.30 — `TestHeadingDetectionSlide::test_slide_heading_fraction_below_threshold`
+- [x] Malformed PDF isolated; batch completes — `TestParseMalformedPDF::test_parse_directory_isolates_failure`
+- [x] Figure flag set on PDF with embedded image — `TestFigureFlag::test_figure_flag_set_on_pdf_with_image`
+- [x] OCR not triggered on native PDF (no warnings) — `TestParseNativePDF::test_no_missing_text_layer_warning`
+- [x] Two docs with same heading produce distinct node_ids — `TestNodeID::test_different_source_file_different_id`
+
+**Known issues carried forward:**
+- `has_table`, `has_equation`, `has_code` always `False` — tracked in todo.md backlog
+- embed/index tested via mocks; BGE-M3 model download required for live integration test (run with `--live`)
 
 Applied from a senior review of the committed P0 and P2′ work (`3eb0da9`). No new phase, no
 new dependencies, no ingest code. Changes are **uncommitted** — the diff is for human review.

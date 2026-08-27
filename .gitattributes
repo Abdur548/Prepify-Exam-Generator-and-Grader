@@ -1,0 +1,9 @@
+# Ensure deterministic JSON hashes across platforms.
+# core.autocrlf=true on Windows converts LF→CRLF on checkout, breaking
+# the P1 gate ("identical course_map.json hash across two ingests").
+* text=auto
+*.json text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+*.toml text eol=lf
+*.txt  text eol=lf
