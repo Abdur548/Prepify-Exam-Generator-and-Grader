@@ -226,6 +226,7 @@ tune it by watching the demo.
 | `ItemSpec` | `contracts/item.py` | `exam/allocate.py` (P2) | `exam/generate.py` (P3) |
 | `GeneratedItem` | `contracts/item.py` | `exam/generate.py` (P3) | `exam/validate.py`, `exam/render.py` (P4) |
 | `CoverageReport` | `contracts/coverage.py` | `exam/coverage.py` (P2) | `exam/render.py` (P4), `app/` (P5) |
+| `TopicCoverage` | `contracts/coverage.py` | `exam/allocate.py` per authored `SectionSpec.topic` (Amendment 01) | `CoverageReport.per_topic` — empty on the derived path |
 
 ### `CoverageReport` — three different ratios, do not confuse them
 
@@ -276,6 +277,57 @@ All three ratios must be displayed together by the P4 renderer, the P5 UI and th
 harness. Showing only the first two reproduces exactly the blindness this field exists to
 remove.
 
+#### `allocation_fidelity` answers a NARROWER question under an authored blueprint
+
+Spec Amendment 01 (option C, signed 2026-08-28) lets a blueprint section carry a free-text
+`topic`. When it does, **the human set the across-topic weights by hand** — those marks were not
+placed by `instructional_mass` and are not "placed by mass" in the sense the ratio was defined
+in. `allocation_fidelity` then measures **within-topic apportionment only**: of the slots a
+topic's own matched nodes received, how many were placed because mass asked for them rather
+than because the mass-preferred node had no span left.
+
+Read across a whole authored paper it is a **weighted average of per-topic fidelities**, not a
+statement about the paper's topic mix. The product claim narrows with it: under an authored
+blueprint it is *"coverage within an authored structure is proved"*, not *"coverage is derived"*.
+
+`topic` is optional and its absence is the derived path — the three shipped blueprints carry no
+topics, `per_topic` is empty for them, and `allocation_fidelity` means exactly what it always
+meant. **Which question the number is answering is therefore read off `per_topic`: empty means
+the old question, non-empty means the narrower one.** It must not be compared across the two
+modes without saying so.
+
+#### `per_topic` — what the student's own material could actually answer
+
+| Field | Meaning |
+|---|---|
+| `topic` / `section_id` | The authored topic and the section that asked for it. |
+| `matched_node_ids` / `matched_node_count` | The candidate nodes it selected, after **both** the flag filter and the topic floor. Ascending `node_id`. |
+| `best_score` | Highest match score among the matched nodes; `0.0` when none matched. |
+| `slots_requested` / `slots_filled` | What the blueprint asked for, and what the material could actually support. |
+
+A row with **`matched_node_count == 0` and `slots_filled == 0` is the most important output of
+the whole mechanism**: the paper asked for marks on something the uploaded documents do not
+cover, and those slots are deliberately left empty. There is no fallback to the unfiltered
+course map — refilling from elsewhere would produce a complete-looking paper about material the
+topic never asked for, which is the exact failure option C exists to prevent.
+
+`best_score` is there because **a weak match is more dangerous than no match**: a topic admitted
+at 0.31 silently draws from the wrong nodes, and without the number nothing distinguishes it
+from a match at 0.95. A near-miss *below* the floor is not visible here — it reports as
+`best_score = 0.0`, same as a topic with no overlap at all.
+
+Matching rule (`exam/allocate.py::_topic_scores`, no new module, no new dependency): case-fold,
+split on non-alphanumeric, drop tokens shorter than `TOPIC_MATCH_MIN_TOKEN_LEN = 3` (the
+threshold does the work a stopword list would — the pinned stack has none), take the node's
+tokens from `path` + `key_terms`, and score
+`|topic ∩ node| / |topic|` — the fraction of the **topic's** vocabulary the node carries.
+Deliberately not Jaccard: the question is "does this node cover the topic", not "are these the
+same size", so a long node is not penalised for holding many tokens. A topic that tokenises to
+nothing **raises** — it cannot discriminate anything, and treating it as a match on everything
+would hand the section the whole course map while looking like a successful topic match.
+`TOPIC_MATCH_MIN_SCORE = 0.3` is **UNCALIBRATED** and must be measured against a real course
+deck before it means anything (todo.md).
+
 ### `SectionSpec` / `Blueprint` invariants (validated at parse time)
 
 - `bloom` must be non-empty — the solver cycles it with `bloom_list[idx % len(bloom_list)]`.
@@ -323,3 +375,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-28 | uncommitted | `.docx` ingestion (`_parse_docx`), `python-docx` dependency, `DOCX_HEADING_STYLE_PREFIX` | Third input format; headings come from real paragraph styles, so they are exact rather than inferred | Ingest fix |
 | 2026-08-28 | uncommitted | `TextBlock.is_slide_heading` → `is_explicit_heading` | A second format now uses the flag; the name said "slide" while DOCX paragraph styles set it too | Ingest fix |
 | 2026-08-28 | uncommitted | `chunk.page` = page of the first block contributing to that chunk, not `section.page_start` | A chunk drawn from page 7 of a 5–9 section was cited as page 5. **Changes chunk IDs / Qdrant point IDs — a prior index is stale and must be re-ingested** | Ingest fix |
+| 2026-08-29 | uncommitted | `SectionSpec.topic` (optional), topic→node matching in `exam/allocate.py`, topic filter beside the flag filter, `TopicCoverage` + `CoverageReport.per_topic`, `TOPIC_MATCH_MIN_TOKEN_LEN` / `TOPIC_MATCH_MIN_SCORE` | Spec Amendment 01 option C, signed 2026-08-28: an authored blueprint sets across-topic weights by hand while the solver still allocates within topic from the student's own material, and says so loudly when the material does not cover a topic. `topic is None` **is** the derived path — `solve()` byte-identical on all three shipped blueprints, all 213 prior tests unmodified | Amendment 01 stage 1 |

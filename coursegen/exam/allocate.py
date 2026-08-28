@@ -10,12 +10,14 @@ and the LLM only phrases what code specifies.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
 from typing import Optional
 
+from coursegen import config
 from coursegen.contracts.blueprint import Blueprint, SectionSpec
 from coursegen.contracts.course_map import CourseMapNode
-from coursegen.contracts.coverage import CoverageReport
+from coursegen.contracts.coverage import CoverageReport, TopicCoverage
 from coursegen.contracts.item import ItemSpec
 from coursegen.exam.coverage import build_report
 
@@ -58,7 +60,10 @@ def solve(
         key=lambda i: (0 if blueprint.sections[i].requires_flags_any else 1, i),
     )
 
-    solved: dict[int, tuple[list[ItemSpec], list[str], list[str], int, int]] = {}
+    solved: dict[
+        int,
+        tuple[list[ItemSpec], list[str], list[str], int, int, Optional[TopicCoverage]],
+    ] = {}
     for i in solve_order:
         solved[i] = _solve_section(
             section=blueprint.sections[i],
@@ -71,13 +76,17 @@ def solve(
     # Emission order: ORIGINAL blueprint position, then slot number within the section.
     # Solving order and emission order are two different things — the rendered paper
     # (P4) must still read A, B, C.
+    all_per_topic: list[TopicCoverage] = []
     for i in range(len(blueprint.sections)):
-        items, warnings, unfilled, by_mass, by_fallthrough = solved[i]
+        items, warnings, unfilled, by_mass, by_fallthrough, topic_coverage = solved[i]
         all_items.extend(items)
         all_warnings.extend(warnings)
         all_unfilled.extend(unfilled)
         all_by_mass += by_mass
         all_by_fallthrough += by_fallthrough
+        # None on the derived path, so per_topic stays empty for topic-free blueprints.
+        if topic_coverage is not None:
+            all_per_topic.append(topic_coverage)
 
     report = build_report(
         blueprint_id=blueprint.blueprint_id,
@@ -89,6 +98,7 @@ def solve(
         slots_total=sum(s.count for s in blueprint.sections),
         slots_by_mass=all_by_mass,
         slots_by_fallthrough=all_by_fallthrough,
+        per_topic=all_per_topic,
     )
     return all_items, report
 
@@ -103,32 +113,107 @@ def _solve_section(
     used_spans: set[str],
     node_slot_map: dict[str, list[str]],
     node_marks_map: dict[str, int],
-) -> tuple[list[ItemSpec], list[str], list[str], int, int]:
-    """Returns (items, warnings, unfilled, slots_by_mass, slots_by_fallthrough).
+) -> tuple[
+    list[ItemSpec], list[str], list[str], int, int, Optional[TopicCoverage]
+]:
+    """Returns (items, warnings, unfilled, slots_by_mass, slots_by_fallthrough,
+    topic_coverage).
 
-    The last two are measurement only. They are counted where the fill decision
-    is already made and change nothing about how it is made.
+    slots_by_mass / slots_by_fallthrough are measurement only. They are counted
+    where the fill decision is already made and change nothing about how it is
+    made.
+
+    topic_coverage is None unless the section carries an authored `topic`.
     """
     warnings: list[str] = []
     unfilled: list[str] = []
     by_mass = 0
     by_fallthrough = 0
 
-    # Step 1: filter candidates by required flags.
+    # Topic bookkeeping. Stays at these values unless the section authors a topic,
+    # and these are exactly what an empty candidate set must report.
+    topic_matched_ids: list[str] = []
+    topic_best_score: float = 0.0
+
+    def _topic_row(slots_filled: int) -> Optional[TopicCoverage]:
+        """None on the derived path; one row per authored topic otherwise."""
+        if section.topic is None:
+            return None
+        return TopicCoverage(
+            topic=section.topic,
+            section_id=section.section_id,
+            matched_node_ids=topic_matched_ids,
+            matched_node_count=len(topic_matched_ids),
+            best_score=topic_best_score,
+            slots_requested=section.count,
+            slots_filled=slots_filled,
+        )
+
+    def _unfilled_section() -> tuple[
+        list[ItemSpec], list[str], list[str], int, int, Optional[TopicCoverage]
+    ]:
+        """No candidates: every slot is reported unfilled, nothing is invented.
+
+        Deliberately NO fallback to the unfiltered course map. Refilling from
+        nodes the filters excluded would produce questions about material the
+        section did not ask for — silently, and looking exactly like a complete
+        paper. That is the failure this design exists to prevent.
+        """
+        unfilled.extend(
+            f"{section.section_id}-{i + 1:02d}" for i in range(section.count)
+        )
+        return [], warnings, unfilled, by_mass, by_fallthrough, _topic_row(0)
+
+    # Scored before either filter runs, so a malformed topic raises whatever the
+    # flags do — the failure must not depend on which filter empties the set first.
+    # Empty dict on the derived path; nothing downstream reads it.
+    scores: dict[str, float] = (
+        {} if section.topic is None else _topic_scores(section.topic, sorted_nodes)
+    )
+
+    # Step 1a: filter candidates by required flags.
     candidates = [
         n for n in sorted_nodes
         if _node_matches_flags(n, section.requires_flags_any)
     ]
 
     if not candidates:
+        # The flag filter emptied the set. Reported BEFORE the topic filter runs,
+        # so the warning names the filter that actually did it: "no nodes carry
+        # flag Y" and "no nodes matched topic X" are different problems with
+        # different fixes, and a merged message helps nobody.
         warnings.append(
             f"Section {section.section_id!r}: no nodes match "
             f"requires_flags_any={section.requires_flags_any!r}; section skipped."
         )
-        unfilled.extend(
-            f"{section.section_id}-{i + 1:02d}" for i in range(section.count)
+        return _unfilled_section()
+
+    # Step 1b: filter the survivors by topic, when the blueprint authored one.
+    # section.topic is None on the derived path — no filter, candidates stay the
+    # whole (flag-filtered) course map, allocation mass-proportional across
+    # everything, exactly as before this field existed.
+    if section.topic is not None:
+        # Applied to the flag survivors only, so matched_node_ids reports the
+        # candidate set the allocation actually drew from — not nodes that score
+        # well on the topic but were already excluded by the flags.
+        candidates = [
+            n for n in candidates
+            if scores[n.node_id] >= config.TOPIC_MATCH_MIN_SCORE
+        ]
+        topic_matched_ids = [n.node_id for n in candidates]
+        topic_best_score = max(
+            (scores[nid] for nid in topic_matched_ids), default=0.0
         )
-        return [], warnings, unfilled, by_mass, by_fallthrough
+
+        if not candidates:
+            warnings.append(
+                f"Section {section.section_id!r}: no nodes matched topic "
+                f"{section.topic!r} at score >= {config.TOPIC_MATCH_MIN_SCORE}; "
+                f"section skipped. The uploaded material does not appear to cover "
+                f"this topic — its slots are left unfilled rather than filled from "
+                f"elsewhere in the course map."
+            )
+            return _unfilled_section()
 
     # Step 2: renormalise mass over the candidate set.
     total_mass = sum(n.instructional_mass for n in candidates)
@@ -221,7 +306,7 @@ def _solve_section(
         node_slot_map[node.node_id].append(slot_id)
         node_marks_map[node.node_id] += section.marks_each
 
-    return items, warnings, unfilled, by_mass, by_fallthrough
+    return items, warnings, unfilled, by_mass, by_fallthrough, _topic_row(filled)
 
 
 def _pick_node(
@@ -291,6 +376,60 @@ def _node_matches_flags(
     if not requires_flags_any:
         return True
     return any(getattr(node.flags, flag, False) for flag in requires_flags_any)
+
+
+# Alphanumeric runs, underscore excluded. Unicode-aware, so accented headings
+# survive tokenisation instead of being shredded into single letters.
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _tokenise(text: str) -> set[str]:
+    """Case-folded alphanumeric tokens, short ones dropped.
+
+    The length threshold is doing the work a stopword list would — the pinned
+    stack has no stopword list and this must not add a dependency for one. It
+    also drops heading numbering ("3.2" → "3", "2") and one-letter algorithm
+    names ("A*" → "a"), which is the intended cost.
+    """
+    return {
+        tok for tok in _TOKEN_RE.findall(text.casefold())
+        if len(tok) >= config.TOPIC_MATCH_MIN_TOKEN_LEN
+    }
+
+
+def _topic_scores(topic: str, nodes: list[CourseMapNode]) -> dict[str, float]:
+    """node_id → fraction of the TOPIC's tokens that the node carries.
+
+    A node's tokens come from its heading `path` plus its YAKE `key_terms`,
+    tokenised the same way as the topic.
+
+    score = |topic_tokens ∩ node_tokens| / |topic_tokens|
+
+    Deliberately NOT Jaccard. The question is "does this node cover the topic",
+    not "are these two the same size", so a long node must not be penalised for
+    holding many tokens.
+
+    An empty topic token set RAISES: a topic made only of short words cannot
+    discriminate anything, and dividing by zero — or treating it as a match on
+    everything — would hand the section the whole course map while looking like
+    a successful topic match. That is a malformed blueprint and it must be fixed
+    by its author, not papered over here. Raised rather than asserted because
+    `python -O` strips asserts.
+    """
+    topic_tokens = _tokenise(topic)
+    if not topic_tokens:
+        raise ValueError(
+            f"Blueprint topic {topic!r} contains no usable tokens: every token is "
+            f"shorter than TOPIC_MATCH_MIN_TOKEN_LEN="
+            f"{config.TOPIC_MATCH_MIN_TOKEN_LEN}. A topic that cannot be tokenised "
+            f"cannot select candidate nodes; fix the topic in the blueprint."
+        )
+    return {
+        n.node_id: len(
+            topic_tokens & _tokenise(" ".join(list(n.path) + list(n.key_terms)))
+        ) / len(topic_tokens)
+        for n in nodes
+    }
 
 
 def _spec_hash(

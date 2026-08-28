@@ -512,6 +512,81 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
+## Spec Amendment 01 — stage 1 (authored topics)  [SHIPPED — uncommitted 2026-08-29]
+
+- [x] `SectionSpec.topic: str | None = None`. `None` **is** the derived path: no topic filter,
+      candidates are the whole course map, allocation mass-proportional across everything. All
+      three shipped blueprints stay topic-free and `solve()` returns byte-identical `ItemSpec[]`
+      on them; all 213 pre-existing tests pass unmodified.
+- [x] Topic→node matching in `exam/allocate.py` (`_tokenise` / `_topic_scores`) — no new module,
+      no new dependency. Candidate filter added beside the flag filter; **no fallback to the
+      unfiltered course map**, unmatched slots stay unfilled.
+- [x] `TopicCoverage` + `CoverageReport.per_topic`; `allocation_fidelity`'s narrowed meaning
+      under an authored blueprint documented in `pipeline.md`.
+- [ ] **🔴 BLOCKS STAGE 4 — the scoring rule punishes specificity. Fix the rule, not the
+      threshold.** Measured on the fixture course map:
+      ```
+      "Search"                                              best = 1.000  -> matches
+      "Uninformed and Informed Search (BFS, DFS, A*, ...)"   best = 0.286  -> matches NOTHING
+      ```
+      The richer, more precise topic scores **3.5x worse than the bare word for the same
+      topic**, and falls below the floor. Cause: `score = |topic ∩ node| / |topic tokens|`
+      puts every enumerated term in the denominator, so each extra specific term a topic names
+      *lowers* its score unless the node happens to contain it. That is backwards — and **every
+      topic in `template_ai_fundamentals_v1` is a long parenthetical string of exactly this
+      shape**, so essentially all of them would match nothing.
+      This is a design error in the rule the reviewer specified, not an implementation fault:
+      the matcher ranks the right node first and the scoring then throws it away. Lowering the
+      floor is not the fix — it would admit noise everywhere else while leaving the dilution
+      intact. Candidate directions, needing a decision: score against the topic's *distinctive*
+      tokens only (IDF-weight against the course map, so "search" outweighs "and"); or take the
+      best-matching sub-phrase rather than whole-string coverage; or normalise by matched
+      tokens rather than topic length. **Settle this before stage 4; stages 2 and 3 are
+      unaffected.**
+- [ ] **Calibrate `TOPIC_MATCH_MIN_SCORE` against the real AI course deck when it arrives.**
+      0.3 was chosen by inspection, not measured — same class of defect as `GROUNDEDNESS_TAU`
+      and `RERANKER_THRESHOLD`. **Do not tune it against `tests/fixtures/course_map_sample.json`:**
+      that fixture is a generic CS syllabus, not representative, and a number fitted to it would
+      look measured while meaning nothing.
+      Evidence it needs calibration, on the fixture: Amendment 01's own example topic
+      `"Uninformed and Informed Search (BFS, DFS, A*, Heuristics)"` scores **2/7 ≈ 0.286** on
+      `n11` ("3.3 Graph Traversal", key_terms BFS/DFS/visited/adjacency) — the one node that is
+      genuinely about search — and is therefore rejected by a floor of 0.3. The matcher ranks
+      the right node first; the floor is what excludes it.
+
+### Open for the human — recorded, deliberately NOT resolved in stage 1
+
+- [ ] **The amendment's own "raises" example does not raise.** Stage 1 specifies "drop tokens
+      shorter than `TOPIC_MATCH_MIN_TOKEN_LEN` (set it to 3)" and separately gives `"of and the"`
+      as a topic that must raise. Those conflict: `"and"` and `"the"` are exactly 3 characters,
+      so they survive `len(tok) >= 3`. The rule was implemented **as written**; `"of and the"`
+      therefore tokenises to `{and, the}` and matches `n03` ("1.3 Variables and Scope") at 0.50
+      on the strength of the word "and". Pinned by
+      `TestMalformedTopicRaises::test_three_letter_stopwords_survive_the_threshold`, which
+      documents the gap rather than blessing it. Fix is a decision, not a guess: raise the
+      threshold to 4, add a real stopword list (new dependency — currently prohibited), or
+      accept that 3-letter connectives dilute the denominator.
+- [ ] **A near-miss below the floor is invisible.** `TopicCoverage.best_score` is specified as
+      "highest score among **matched** nodes; 0.0 if none matched", so a topic whose best node
+      scored 0.29 reports `best_score = 0.0` — indistinguishable from a topic with no overlap at
+      all. Amendment §7 calls the half-match the *more* dangerous case. Recording the best score
+      over all candidates (matched or not) would make it inspectable; that changes the field's
+      specified meaning, so it needs a decision.
+- [ ] **Solve order still keys only on `requires_flags_any`.** A topic-restricted section is at
+      least as constrained as a flag-restricted one, so in a MIXED blueprint (some sections
+      topical, some not) an unconstrained section solved first can drain the spans a topical
+      section needs — reported as span exhaustion, not as missing material. Not changed: it is
+      outside stage 1's brief, and every authored blueprint envisaged so far carries a topic on
+      every section. Fix, if wanted, is one key: `(0 if (requires_flags_any or topic) else 1, i)`
+      — provably a no-op for topic-free blueprints.
+- [ ] **`spec_hash` deliberately excludes `topic`.** The topic decides *which node* is chosen,
+      not how an item is phrased from a span, so two papers hitting the same node+span+bloom+
+      marks+type still share a cache entry. Correct as far as stage 1 goes; revisit at stage 3
+      when `generation_instructions` starts reaching the prompt, because that text **does**
+      change the output for identical inputs.
+
+---
+
 ## Discovered mid-phase (do NOT do now)
 
 - `coursegen/contracts/course_map.py` imports `Field` from pydantic without using it. Harmless;

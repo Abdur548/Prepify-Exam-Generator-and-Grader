@@ -168,6 +168,25 @@ MCQ_OPTION_LABELS: str = "ABCDEFGH"
 MAX_REGENERATION_PASSES: int = 1     # R5: cap enforced in code, not just comment
 
 # ---------------------------------------------------------------------------
+# Topic → node matching (Spec Amendment 01, stage 1)
+# ---------------------------------------------------------------------------
+# An authored blueprint section may name its own `topic`; the solver matches that
+# free text against each node's `path` + `key_terms` to build the candidate set.
+# Both sides are tokenised the same way: case-folded, split on non-alphanumeric,
+# tokens shorter than this dropped. The length threshold is doing the work a
+# stopword list would ("of", "a", "3.2", "A*" all fall out) — there is no stopword
+# list in the pinned stack and matching must not add a dependency for one.
+TOPIC_MATCH_MIN_TOKEN_LEN: int = 3
+# UNIT: fraction of the TOPIC's own tokens found in the node, in [0, 1].
+# Deliberately NOT Jaccard: the question is "does this node cover the topic", not
+# "are these the same size", so a long node must not be penalised for having many
+# tokens. UNCALIBRATED — 0.3 was chosen by inspection, not measured, and until it
+# is set against a real ingested course deck it does not mean anything. Do NOT
+# tune it against the synthetic test fixtures: they are not representative, and a
+# number fitted to them would look measured while meaning nothing.
+TOPIC_MATCH_MIN_SCORE: float = 0.3
+
+# ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
 CHAT_MAX_TURNS: int = 6              # L6: older turns dropped, never summarised

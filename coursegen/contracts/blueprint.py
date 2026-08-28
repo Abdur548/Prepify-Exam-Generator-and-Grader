@@ -16,6 +16,13 @@ class SectionSpec(BaseModel):
     bloom: list[str] = Field(min_length=1)
     options_count: Optional[int] = None         # mcq only
     requires_flags_any: Optional[list[str]] = None  # e.g. ["has_figure"]
+    # Free-text topic for an AUTHORED blueprint, e.g.
+    # "Uninformed and Informed Search (BFS, DFS, A*, Heuristics)".
+    # None is NOT a degenerate case — it IS the derived path and the existing
+    # product: no topic filter, candidates are the whole course map, allocation
+    # mass-proportional across everything. All three shipped blueprints leave it
+    # None. One code path in allocate.py serves both modes.
+    topic: Optional[str] = None
 
 
 class Blueprint(BaseModel):

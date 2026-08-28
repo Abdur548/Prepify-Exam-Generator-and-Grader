@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from typing import Optional
+
 from coursegen.contracts.course_map import CourseMapNode
-from coursegen.contracts.coverage import CoverageReport, NodeCoverage
+from coursegen.contracts.coverage import CoverageReport, NodeCoverage, TopicCoverage
 
 
 def build_report(
@@ -17,6 +19,7 @@ def build_report(
     slots_total: int,
     slots_by_mass: int,
     slots_by_fallthrough: int,
+    per_topic: Optional[list[TopicCoverage]] = None,
 ) -> CoverageReport:
     covered_ids = set(node_slot_map.keys())
     nodes_total = len(course_map)
@@ -75,6 +78,9 @@ def build_report(
         allocation_fidelity=allocation_fidelity,
         mass_covered=mass_covered,
         per_node=per_node,
+        # None means "no authored topics in this blueprint" (the derived path),
+        # which reports as an empty list — never as a missing field.
+        per_topic=[] if per_topic is None else list(per_topic),
         unfilled_slots=unfilled_slots,
         warnings=warnings,
     )
