@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 import shutil
 import threading
 from pathlib import Path
@@ -46,6 +48,7 @@ from coursegen.ingest.coursemap import (
 )
 from coursegen.ingest.index import get_client
 from coursegen.ingest.parse import (
+    TextBlock,
     count_math_chars,
     is_code_font,
     is_equation_content,
@@ -53,7 +56,7 @@ from coursegen.ingest.parse import (
     parse_directory,
     parse_file,
 )
-from coursegen.ingest.structure import extract_sections, heading_fraction
+from coursegen.ingest.structure import LeafSection, extract_sections, heading_fraction
 from coursegen.contracts.course_map import NodeFlags
 
 
@@ -123,13 +126,242 @@ class TestParsePPTX:
 
     def test_title_marked_as_slide_heading(self, minimal_pptx: Path) -> None:
         doc = parse_file(minimal_pptx)
-        heading_blocks = [b for b in doc.blocks if b.is_slide_heading]
+        heading_blocks = [b for b in doc.blocks if b.is_explicit_heading]
         assert len(heading_blocks) == 2
 
     def test_body_not_slide_heading(self, minimal_pptx: Path) -> None:
         doc = parse_file(minimal_pptx)
-        body_blocks = [b for b in doc.blocks if not b.is_slide_heading and b.block_type == "text"]
+        body_blocks = [
+            b for b in doc.blocks
+            if not b.is_explicit_heading and b.block_type == "text"
+        ]
         assert len(body_blocks) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Parse — legacy .ppt
+#
+# `.ppt` is scanned but cannot be parsed. It stays in the scanned set so a legacy
+# deck is never silently dropped from the corpus, and parse_file rejects it by name.
+# ---------------------------------------------------------------------------
+
+class TestLegacyPPT:
+    def test_parse_file_raises(self, legacy_ppt: Path) -> None:
+        with pytest.raises(ValueError):
+            parse_file(legacy_ppt)
+
+    def test_error_names_the_format_and_the_remedy(self, legacy_ppt: Path) -> None:
+        """
+        A generic parse failure reads as "your file is broken". `.ppt` is not broken,
+        it is the wrong container — a binary format rather than OOXML — and the
+        message has to say so and say what to do about it.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            parse_file(legacy_ppt)
+        message = str(excinfo.value)
+        assert "old_deck.ppt" in message
+        assert "not supported" in message.lower()
+        assert "not OOXML" in message
+        assert "convert" in message.lower() and ".pptx" in message
+
+    def test_ppt_is_scanned_and_reported_not_silently_ignored(
+        self, legacy_ppt: Path, native_pdf: Path, tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """
+        The file must reach the parser and be reported, and the batch must survive it
+        (R3). Dropping `.ppt` from the scanned set would make an unreadable deck
+        vanish from the corpus without a word — worse than an error.
+        """
+        source_dir = tmp_path / "mixed"
+        source_dir.mkdir()
+        shutil.copy(legacy_ppt, source_dir / "old_deck.ppt")
+        shutil.copy(native_pdf, source_dir / "good.pdf")
+
+        with caplog.at_level(logging.ERROR, logger="coursegen.ingest.parse"):
+            docs = parse_directory(source_dir)
+
+        assert [d.source_file for d in docs] == ["good.pdf"], (
+            "the .ppt was either skipped silently or took the batch down with it"
+        )
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("old_deck.ppt" in m for m in messages), (
+            f"the .ppt was never reported: {messages}"
+        )
+        assert any(".pptx" in m for m in messages), (
+            f"the logged failure does not carry the remedy: {messages}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Parse — DOCX
+# ---------------------------------------------------------------------------
+
+class TestParseDOCX:
+    def test_source_type_is_docx(self, structured_docx: Path) -> None:
+        assert parse_file(structured_docx).source_type == "docx"
+
+    def test_headings_detected_by_paragraph_style(self, structured_docx: Path) -> None:
+        """
+        EXACT, not inferred: `paragraph.style.name` starts with
+        config.DOCX_HEADING_STYLE_PREFIX. Every heading and only the headings.
+        """
+        doc = parse_file(structured_docx)
+        headings = [b.text for b in doc.blocks if b.is_explicit_heading]
+        assert headings == [
+            "Chapter 1: Sorting Algorithms",
+            "1.1 QuickSort",
+            "1.2 Architecture Diagram",
+        ]
+
+    def test_body_paragraphs_are_not_headings(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        body = [
+            b for b in doc.blocks
+            if b.block_type == "text" and not b.is_explicit_heading
+        ]
+        assert body, "no body blocks parsed"
+        assert any("Sorting arranges elements" in b.text for b in body)
+        assert not any(b.text.startswith("Chapter 1:") for b in body), (
+            "a styled heading was also emitted as a body block"
+        )
+
+    def test_heading_prefix_comes_from_config(self, structured_docx: Path) -> None:
+        """The prefix is a config constant, not a literal typed into parse.py."""
+        assert config.DOCX_HEADING_STYLE_PREFIX == "Heading"
+        doc = parse_file(structured_docx)
+        assert any(b.is_explicit_heading for b in doc.blocks)
+
+    def test_table_cell_text_extracted(self, structured_docx: Path) -> None:
+        """
+        A has_table node with empty text can be allocated a question it has no
+        content to ground — the same defect the PPTX path shipped with. Cell text
+        must reach the block.
+        """
+        doc = parse_file(structured_docx)
+        table_blocks = [b for b in doc.blocks if b.has_table]
+        assert table_blocks, "no has_table block emitted for a w:tbl element"
+        text = table_blocks[0].text
+        for expected in ("Algorithm", "Complexity", "QuickSort", "O(n log n)"):
+            assert expected in text, f"{expected!r} missing from table text: {text!r}"
+
+    def test_table_text_preserves_cell_boundaries(self, structured_docx: Path) -> None:
+        """Row associations survive: 'QuickSort | O(n log n)', not run together."""
+        doc = parse_file(structured_docx)
+        text = next(b.text for b in doc.blocks if b.has_table)
+        assert " | " in text, f"cell boundaries flattened away: {text!r}"
+
+    def test_merged_cells_are_not_duplicated(self, tmp_path: Path) -> None:
+        """
+        python-docx behaves the OPPOSITE way to python-pptx on merges: it resolves
+        every spanned position to the same `w:tc` and REPEATS the text there, where
+        python-pptx returns "". A naive rows x columns walk prints the merged cell
+        once per spanned position.
+        """
+        from docx import Document
+
+        document = Document()
+        table = document.add_table(rows=2, cols=3)
+        table.cell(0, 0).text = "Algorithm"
+        table.cell(0, 1).text = "Complexity"
+        table.cell(1, 0).text = "QuickSort"
+        table.cell(1, 1).text = "O(n log n)"
+        table.cell(0, 1).merge(table.cell(0, 2))
+
+        path = tmp_path / "merged.docx"
+        document.save(str(path))
+
+        doc = parse_file(path)
+        text = next(b.text for b in doc.blocks if b.has_table)
+        assert "Algorithm" in text and "QuickSort" in text
+        assert text.count("Complexity") == 1, (
+            f"merged cell text repeated once per spanned position: {text!r}"
+        )
+
+    def test_monospace_run_flagged(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        assert any(b.has_code for b in doc.blocks), (
+            "run.font.name='Consolas' was not flagged has_code"
+        )
+
+    def test_math_unicode_flagged(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        assert any(b.has_equation for b in doc.blocks), (
+            "Unicode mathematics in a paragraph was not flagged has_equation"
+        )
+
+    def test_inline_image_becomes_a_figure_block(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        assert any(b.block_type == "figure" for b in doc.blocks), (
+            "document.inline_shapes produced no figure block"
+        )
+
+    def test_prose_paragraph_trips_no_flags(self, structured_docx: Path) -> None:
+        """False positives matter as much as false negatives."""
+        doc = parse_file(structured_docx)
+        prose = next(b for b in doc.blocks if "Sorting arranges elements" in b.text)
+        assert not (prose.has_table or prose.has_code or prose.has_equation)
+
+    def test_no_warnings_on_a_well_formed_document(
+        self, structured_docx: Path
+    ) -> None:
+        """
+        In particular the inline-shape cross-check must balance: every shape reported
+        by python-docx was placed as a figure block.
+        """
+        doc = parse_file(structured_docx)
+        assert not doc.warnings, f"unexpected warnings: {doc.warnings}"
+
+    def test_page_is_a_one_based_block_ordinal(self, structured_docx: Path) -> None:
+        """
+        A .docx has NO pages — pagination does not exist until Word renders the
+        document. `page` is therefore the 1-based ordinal of the block within the
+        document: a disclosed limitation recorded in pipeline.md, not a page estimate.
+        No page-counting heuristic is applied, deliberately.
+        """
+        doc = parse_file(structured_docx)
+        assert [b.page for b in doc.blocks] == list(range(1, len(doc.blocks) + 1))
+        assert doc.page_count == len(doc.blocks)
+
+
+# ---------------------------------------------------------------------------
+# Structure — DOCX takes the explicit-heading path
+# ---------------------------------------------------------------------------
+
+class TestDOCXStructure:
+    def test_sections_open_at_headings(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        paths = [s.path for s in extract_sections(doc)]
+        assert ["Chapter 1: Sorting Algorithms"] in paths
+        assert ["1.1 QuickSort"] in paths
+        assert ["1.2 Architecture Diagram"] in paths
+
+    def test_heading_blocks_are_not_also_content(self, structured_docx: Path) -> None:
+        doc = parse_file(structured_docx)
+        for section in extract_sections(doc):
+            assert not any(b.is_explicit_heading for b in section.blocks), (
+                f"heading block duplicated into the content of {section.path!r}"
+            )
+
+    def test_font_size_path_is_not_used_for_docx(self, structured_docx: Path) -> None:
+        """
+        DOCX blocks carry no span font sizes at all, so the PDF relative-threshold
+        path would find no headings and collapse the whole document into one
+        fallback section. The explicit-heading path must be taken instead.
+        """
+        doc = parse_file(structured_docx)
+        assert all(not b.span_font_sizes for b in doc.blocks)
+        assert len(extract_sections(doc)) >= 3
+
+    def test_table_and_figure_reach_their_own_sections(
+        self, structured_docx: Path
+    ) -> None:
+        sections = extract_sections(parse_file(structured_docx))
+        flags = {tuple(s.path): _derive_flags(s) for s in sections}
+        assert flags[("1.1 QuickSort",)].has_table
+        assert flags[("1.1 QuickSort",)].has_code
+        assert flags[("1.1 QuickSort",)].has_equation
+        assert flags[("1.2 Architecture Diagram",)].has_figure
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +436,176 @@ class TestChunkDeterminism:
         id1 = _chunk_id("same text", "file_a.pdf", 0)
         id2 = _chunk_id("same text", "file_b.pdf", 0)
         assert id1 != id2
+
+
+# ---------------------------------------------------------------------------
+# Chunk — page precision
+#
+# Every chunk of a section used to be stamped with `section.page_start`, so a chunk
+# drawn from page 7 of a section spanning pages 5-9 was cited as page 5. Chunk pages
+# now come from the blocks that actually produced them.
+# ---------------------------------------------------------------------------
+
+def _paged_block(page: int, source_file: str = "multi.pdf", words: int = 260) -> TextBlock:
+    """A text block whose every word names the page it came from."""
+    return TextBlock(
+        block_type="text",
+        text=" ".join(f"p{page:02d}" for _ in range(words)),
+        page=page,
+        max_font_size=11.0,
+        span_font_sizes=[11.0],
+        source_file=source_file,
+    )
+
+
+class TestChunkPagePrecision:
+    @staticmethod
+    def _multi_page_section() -> LeafSection:
+        """One block per page, pages 5-9, long enough to split into several chunks."""
+        blocks = [_paged_block(p) for p in range(5, 10)]
+        return LeafSection(
+            path=["Chapter 1"],
+            blocks=blocks,
+            page_start=5,
+            page_end=9,
+            source_file="multi.pdf",
+        )
+
+    def test_section_fixture_actually_splits(self) -> None:
+        """Guard on the fixture itself: a single chunk would prove nothing."""
+        assert len(chunk_section(self._multi_page_section())) > 1
+
+    def test_chunk_pages_are_not_all_page_start(self) -> None:
+        chunks = chunk_section(self._multi_page_section())
+        pages = [c.page for c in chunks]
+        assert pages != [5] * len(chunks), (
+            "every chunk is still stamped with section.page_start"
+        )
+        assert len(set(pages)) > 1, f"all chunks share one page: {pages}"
+
+    def test_every_chunk_page_is_a_page_the_chunk_draws_on(self) -> None:
+        """A citation must point at a page whose text is actually in the chunk."""
+        for chunk in chunk_section(self._multi_page_section()):
+            assert f"p{chunk.page:02d}" in chunk.raw_text, (
+                f"chunk cites page {chunk.page} but carries no text from it: "
+                f"{chunk.raw_text[:60]!r}"
+            )
+
+    def test_page_is_the_first_contributing_block(self) -> None:
+        """The documented tie-break, checked against the chunk's own content."""
+        for chunk in chunk_section(self._multi_page_section()):
+            present = sorted({int(m) for m in re.findall(r"p(\d\d)", chunk.raw_text)})
+            assert chunk.page == present[0], (
+                f"chunk page {chunk.page} is not the first page it draws on "
+                f"({present})"
+            )
+
+    def test_pages_are_non_decreasing_and_within_the_section(self) -> None:
+        pages = [c.page for c in chunk_section(self._multi_page_section())]
+        assert pages == sorted(pages), f"chunk pages went backwards: {pages}"
+        assert set(pages) <= {5, 6, 7, 8, 9}
+
+    def test_first_contributing_block_wins_when_a_chunk_spans_two(self) -> None:
+        """
+        A section short enough to be one chunk, drawn from two blocks on different
+        pages. page_start is set to an impossible value so the assertion cannot pass
+        by accident.
+        """
+        blocks = [
+            TextBlock("text", "alpha beta gamma", 3, 11.0, [11.0], "two.pdf"),
+            TextBlock("text", "delta epsilon zeta", 4, 11.0, [11.0], "two.pdf"),
+        ]
+        section = LeafSection(
+            path=["S"], blocks=blocks, page_start=99, page_end=99,
+            source_file="two.pdf",
+        )
+        chunks = chunk_section(section)
+        assert len(chunks) == 1
+        assert chunks[0].page == 3, (
+            "a chunk spanning two blocks must take the FIRST block's page"
+        )
+
+    def test_figure_only_section_uses_its_figure_block_page(self) -> None:
+        """The empty-text chunk is produced by the figure block, so it cites its page."""
+        blocks = [TextBlock("figure", "", 12, 0.0, [], "fig.pdf")]
+        section = LeafSection(
+            path=["Fig"], blocks=blocks, page_start=0, page_end=12,
+            source_file="fig.pdf",
+        )
+        chunks = chunk_section(section)
+        assert len(chunks) == 1
+        assert chunks[0].page == 12
+
+    def test_precise_pages_are_still_deterministic(self) -> None:
+        """
+        Chunk IDs changed by design (page is hashed into `_chunk_id`), but two runs
+        over the same input must still agree — that is what makes upsert a no-op.
+        """
+        section = self._multi_page_section()
+        first = [(c.chunk_id, c.page) for c in chunk_section(section)]
+        second = [(c.chunk_id, c.page) for c in chunk_section(section)]
+        assert first == second
+
+    def test_real_pdf_chunks_are_not_all_page_zero(self, native_pdf: Path) -> None:
+        """
+        End-to-end regression over a real two-page PDF. `_extract_pdf_sections` hands
+        every section `page_start=0`, so before this change every chunk of every PDF
+        was cited as page 0 regardless of where its text came from.
+        """
+        doc = parse_file(native_pdf)
+        pages = {
+            c.page for s in extract_sections(doc) for c in chunk_section(s)
+        }
+        assert pages != {0}, (
+            "every chunk of a two-page PDF is on page 0 — section page_start is "
+            "still being stamped onto chunks"
+        )
+
+
+# ---------------------------------------------------------------------------
+# PDF section page_start — must reflect where the section's content actually is
+# ---------------------------------------------------------------------------
+
+class TestPDFSectionPageStart:
+    """
+    `flush()` used to read a `page_start` variable that was initialised to 0 and
+    never reassigned, while the maintained `current_page_start` went unread. Every
+    PDF leaf section therefore reported page_start=0 and every PDF node carried
+    page_span=(0, page_end). The value was deterministic, so the idempotency gate
+    passed on it happily — it was simply wrong, on every node, in a field that
+    feeds citations.
+    """
+
+    def test_sections_report_the_page_their_content_starts_on(
+        self, tmp_path: Path
+    ) -> None:
+        import fitz
+
+        doc = fitz.open()
+        for i in range(3):
+            page = doc.new_page()
+            page.insert_text((72, 100), f"Chapter {i + 1}: Topic", fontsize=24)
+            for y in range(4):
+                page.insert_text((72, 160 + y * 40), f"Body line {y} on page {i}.", fontsize=11)
+        path = tmp_path / "multi.pdf"
+        doc.save(str(path))
+        doc.close()
+
+        sections = extract_sections(parse_file(path))
+        assert len(sections) == 3
+
+        starts = [s.page_start for s in sections]
+        assert starts == [0, 1, 2], (
+            f"expected each chapter to start on its own page, got {starts}"
+        )
+        assert len(set(starts)) > 1, "every section claims the same page_start"
+
+    def test_page_start_never_exceeds_page_end(self, native_pdf: Path) -> None:
+        for section in extract_sections(parse_file(native_pdf)):
+            assert section.page_start <= section.page_end, (
+                f"{section.path}: page_start={section.page_start} > "
+                f"page_end={section.page_end}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +1158,38 @@ class TestIngestPointCount:
             "uuid5 chunk IDs are supposed to make upsert a no-op (C1)."
         )
         assert sorted(cid for n in nodes2 for cid in n.chunk_ids) == sorted(chunk_ids)
+
+    def test_docx_ingests_end_to_end_with_every_flag(
+        self, structured_docx: Path, tmp_path: Path
+    ) -> None:
+        """
+        The whole DOCX seam through a real local-mode Qdrant: parse -> structure ->
+        chunk -> course map. All four NodeFlags must be reachable from a DOCX, or a
+        blueprint's `requires_flags_any` would starve on a DOCX-only corpus.
+        """
+        source_dir = tmp_path / "docs"
+        source_dir.mkdir()
+        shutil.copy(structured_docx, source_dir / structured_docx.name)
+        data_dir = tmp_path / "data"
+
+        nodes1 = _ingest_with_real_qdrant(source_dir, data_dir)
+        count1 = _point_count(data_dir)
+        nodes2 = _ingest_with_real_qdrant(source_dir, data_dir)
+        count2 = _point_count(data_dir)
+
+        assert nodes1, "ingest produced no nodes from a DOCX"
+        counts = {
+            flag: sum(1 for n in nodes1 if getattr(n.flags, flag))
+            for flag in ("has_figure", "has_table", "has_equation", "has_code")
+        }
+        for flag, count in counts.items():
+            assert count > 0, f"{flag} unreachable from a DOCX: {counts}"
+
+        # Idempotency holds for the new format too.
+        assert count2 == count1
+        assert sorted(c for n in nodes1 for c in n.chunk_ids) == sorted(
+            c for n in nodes2 for c in n.chunk_ids
+        )
 
     def test_multi_document_corpus_point_count_stable(
         self, rich_source_dir: Path, tmp_path: Path

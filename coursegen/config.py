@@ -26,6 +26,13 @@ HEADING_STD_FACTOR: float = 1.5
 HEADING_MAX_BLOCK_PCT: float = 0.30   # gate: <30% of blocks classified as headings
 OCR_DPI: int = 150
 
+# DOCX heading detection. Unlike PDF (relative font size) and like PPTX (placeholder
+# type), this is EXACT rather than inferred: Word stores a real paragraph style, and
+# every built-in heading level is named "Heading 1" … "Heading 9". Prefix-matched, so
+# one constant covers all nine levels. "TOC Heading" and "Title" deliberately do not
+# match — neither opens a content section.
+DOCX_HEADING_STYLE_PREFIX: str = "Heading"
+
 # Serialisation policy for course_map.json. P1's gate is "identical course_map.json
 # hash across two ingests", which is unachievable without a fixed float-rounding and
 # key-ordering policy: raw float repr and dict insertion order both vary.

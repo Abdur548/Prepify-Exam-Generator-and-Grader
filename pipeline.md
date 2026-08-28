@@ -45,20 +45,38 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
 - **Status:** implemented (on fixture; real data in P2)
 
 ### Ingest
-- **Input:** a directory of `.pdf` / `.pptx` / `.ppt` files
+- **Input:** a directory of `.pdf` / `.pptx` / `.docx` files. `.ppt` is **scanned but never
+  parsed**: legacy PowerPoint is a binary format, not OOXML, so python-pptx cannot read one
+  at all. It stays in the scanned set so a legacy deck never disappears from the corpus
+  silently; `parse_file` rejects it by name with the remedy ("convert it to .pptx and
+  re-run") and `parse_directory`'s per-file `try/except` carries that message to the log
+  while the batch continues (R3).
 - **Output:** `list[CourseMapNode]` persisted to `course_map.json`, plus dense+sparse
   points in the Qdrant collection
 - **Modules:** `ingest/parse.py` → `structure.py` → `chunk.py` → `embed.py` → `index.py`,
   orchestrated by `ingest/coursemap.py`
 - **LLM calls:** none, at any stage (C2, §9.1). Key terms come from YAKE, which is CPU-only.
 - **Key parameters:** `MAX_CHUNK_TOKENS = 512`, `CHUNK_OVERLAP_PCT = 0.15`,
-  `HEADING_STD_FACTOR = 1.5`, `CHARS_PER_TOKEN_ESTIMATE = 4`, `PARSE_TIMEOUT_SECONDS = 60`
-- **Heading detection:** relative font-size threshold (`modal + 1.5σ`), never an absolute
-  cutoff — a slide-exported PDF has 24 pt body text and an absolute threshold would call
-  every block a heading. PPTX uses placeholder types TITLE / CENTER_TITLE.
+  `HEADING_STD_FACTOR = 1.5`, `CHARS_PER_TOKEN_ESTIMATE = 4`, `PARSE_TIMEOUT_SECONDS = 60`,
+  `DOCX_HEADING_STYLE_PREFIX = "Heading"`
+- **Heading detection — two paths, not one.** PDF is *inferred*: a relative font-size
+  threshold (`modal + 1.5σ`), never an absolute cutoff — a slide-exported PDF has 24 pt body
+  text and an absolute threshold would call every block a heading. PPTX and DOCX are
+  *explicit*: the format itself declares the heading (PPTX placeholder TITLE / CENTER_TITLE;
+  DOCX `paragraph.style.name` starting with `DOCX_HEADING_STYLE_PREFIX`, which covers
+  "Heading 1"…"Heading 9"). `TextBlock.is_explicit_heading` carries that declaration —
+  renamed from `is_slide_heading` when DOCX became the second format to use it. DOCX heading
+  paths are flat, one entry per section, exactly like PPTX slide titles; style names do carry
+  a level and could nest, which is logged in `todo.md` rather than assumed.
 - **Idempotency (C1):** `chunk_id = uuid5(...)` over content, so a re-ingest upserts by key
   instead of appending. `node_id = sha1(source_file + "|" + "/".join(path))`.
   `COURSE_MAP_FLOAT_PRECISION` + `JSON_SORT_KEYS` make the JSON byte-stable.
+- **Chunk page precision:** `chunk.page` is the page of the **first block that contributed
+  characters to that chunk**, not the section's `page_start`. A chunk drawn from page 7 of a
+  section spanning 5–9 used to be cited as page 5. The joining space between two blocks
+  belongs to neither and never decides the page; a chunk that overlaps no block raises rather
+  than guessing. `page` is hashed into `chunk_id`, so this **changed every chunk ID whose
+  page moved** — see the re-ingest note in `progress.md`.
 - **Per-file timeout (S3):** each file is parsed under a
   `ThreadPoolExecutor.result(timeout=PARSE_TIMEOUT_SECONDS)` watchdog; an overrun is logged
   and the file skipped. `signal.alarm` is Unix-only, and a Python thread cannot be killed, so
@@ -73,12 +91,12 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
 leaf section's blocks. A section is flagged if **any** of its blocks is, because the flag
 answers "can this node anchor a question of that kind?".
 
-| Flag | Status | PDF source | PPTX source |
-|---|---|---|---|
-| `has_figure` | fact | image block (`get_text("dict")` type 1) | shape type `MSO_SHAPE_TYPE.PICTURE` |
-| `has_table` | detection | `page.find_tables()`; a text block whose bbox intersects a detected table's bbox | `shape.has_table` (exact) |
-| `has_code` | **heuristic** | span font name matches `MONOSPACE_FONT_SUBSTRINGS` | `run.font.name` matches the same list |
-| `has_equation` | **heuristic** | font name in `MATH_FONT_SUBSTRINGS`, **or** ≥ `EQUATION_MIN_MATH_CHARS` characters from `MATH_UNICODE_RANGES` | same two prongs |
+| Flag | Status | PDF source | PPTX source | DOCX source |
+|---|---|---|---|---|
+| `has_figure` | fact | image block (`get_text("dict")` type 1) | shape type `MSO_SHAPE_TYPE.PICTURE` | `document.inline_shapes`, placed at the paragraph that contains each shape |
+| `has_table` | detection | `page.find_tables()`; a text block whose bbox intersects a detected table's bbox | `shape.has_table` (exact) | a `w:tbl` body element (exact) |
+| `has_code` | **heuristic** | span font name matches `MONOSPACE_FONT_SUBSTRINGS` | `run.font.name` matches the same list | `run.font.name` matches the same list |
+| `has_equation` | **heuristic** | font name in `MATH_FONT_SUBSTRINGS`, **or** ≥ `EQUATION_MIN_MATH_CHARS` characters from `MATH_UNICODE_RANGES` | same two prongs | same two prongs |
 
 This matters beyond completeness: blueprints filter candidate nodes with
 `requires_flags_any`, so **a flag that can never be true silently starves a whole exam
@@ -101,6 +119,39 @@ Known false modes, stated rather than buried:
   (`cell.is_spanned`) — python-pptx returns the merged text on the origin cell and `""` at every
   spanned position, so a naive rows/cells walk emits a stray blank cell per merge. Table text
   counts toward `token_count`, so tables now contribute to `instructional_mass`.
+- DOCX table cell text is extracted the same way, with the same two separators, but the merge
+  handling is **inverted**: python-docx resolves every spanned position to the *same* `w:tc`
+  element and repeats its text there, where python-pptx returns `""`. Cells are therefore
+  de-duplicated by `w:tc` identity across the table, covering horizontal and vertical merges.
+- A DOCX inline shape anchored somewhere the body walk does not visit (a header, a footnote, a
+  table cell) cannot be placed as a figure block. The parser cross-checks the number placed
+  against `len(document.inline_shapes)` and records a warning on any mismatch rather than
+  under-reporting `has_figure` silently.
+
+#### ⚠ DOCX `page` is a block ordinal, not a printed page number
+
+**A `.docx` has no page numbers.** Pagination does not exist until Word lays the document out
+against a printer, the style definitions and the installed font metrics; python-docx cannot
+compute it and neither can Prepify. `TextBlock.page` is nonetheless an `int` that flows into
+`chunk.page` and from there into the user-visible citation.
+
+For DOCX, `page` is therefore the **1-based ordinal of the block within the document**. A DOCX
+citation reading "page 12" means **the 12th block** — the 12th paragraph, table or image — and
+not the twelfth printed page. PDF pages and PPTX slides are unaffected and remain real
+0-indexed page/slide numbers.
+
+This is a **disclosed limitation, not an approximation waiting to be tightened**. Counting
+explicit page breaks was considered and rejected: most real documents contain none, so such a
+count would report "page 1" for a forty-page document, and a plausible-looking wrong page
+number in a citation is worse than an honestly-labelled ordinal. The fix belongs in the
+renderer — label a DOCX locator `¶12` rather than `p.12` — which needs the source type
+available at citation time. Logged in `todo.md` for P4/P5.
+
+Consequence for `MAX_PAGES`: it is deliberately **not** applied to DOCX. There are no pages to
+count, and capping the block count at 2 000 would both assert the block==page equivalence this
+section exists to deny and reject a legitimate hundred-page document. The S3 guards that do
+apply to DOCX are `MAX_FILE_SIZE_BYTES`, `MAX_DECOMPRESSED_SIZE_BYTES` (shared OOXML zip-bomb
+check) and the per-file `PARSE_TIMEOUT_SECONDS` watchdog.
 
 #### `instructional_mass`
 
@@ -268,3 +319,7 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-28 | uncommitted | `CoverageReport` gains `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity`; `build_report` asserts `by_mass + by_fallthrough == slots_filled` | `final_default` reported `coverage_ratio 1.000` and `fill_ratio 1.000` while 38% of its slots were placed by span exhaustion, not by mass. Measurement only — allocation behaviour unchanged, `solve()` byte-identical | P2 instrumentation |
 | 2026-08-28 | uncommitted | `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`, mocked P3 tests | Batched schema-constrained generation with cache, validation gates and manifest | P3 |
 | 2026-08-28 | uncommitted | `exam/render.py`, `retrieve/hybrid.py`, `retrieve/rerank.py`, `chat/answer.py`, P4 tests | HTML render, coverage table, hybrid retrieval/rerank and chat path; PDF gate blocked by missing GTK | P4 partial |
+| 2026-08-28 | uncommitted | `.ppt` rejected by name in `parse_file` with the conversion remedy, still scanned | It was advertised as supported but python-pptx cannot read a binary OLE2 file; the opaque zip error read as a corrupt document rather than an unsupported format | Ingest fix |
+| 2026-08-28 | uncommitted | `.docx` ingestion (`_parse_docx`), `python-docx` dependency, `DOCX_HEADING_STYLE_PREFIX` | Third input format; headings come from real paragraph styles, so they are exact rather than inferred | Ingest fix |
+| 2026-08-28 | uncommitted | `TextBlock.is_slide_heading` → `is_explicit_heading` | A second format now uses the flag; the name said "slide" while DOCX paragraph styles set it too | Ingest fix |
+| 2026-08-28 | uncommitted | `chunk.page` = page of the first block contributing to that chunk, not `section.page_start` | A chunk drawn from page 7 of a 5–9 section was cited as page 5. **Changes chunk IDs / Qdrant point IDs — a prior index is stale and must be re-ingested** | Ingest fix |

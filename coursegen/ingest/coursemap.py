@@ -33,7 +33,7 @@ def ingest(
     data_dir: Optional[Path] = None,
 ) -> list[CourseMapNode]:
     """
-    Run the full ingest pipeline on all PDF/PPTX files in *source_dir*.
+    Run the full ingest pipeline on all PDF/PPTX/DOCX files in *source_dir*.
 
     Idempotent (C1): re-running on unchanged input produces identical node IDs,
     identical course_map.json, and identical Qdrant point count.
@@ -170,7 +170,8 @@ def _derive_flags(section: LeafSection) -> NodeFlags:
     anchor a question of that kind?", and one table on one page is enough.
 
     Only `has_figure` is a hard fact (an image block is an image block). `has_table`
-    is a detection (PyMuPDF `find_tables` / python-pptx `shape.has_table`), and
+    is a detection (PyMuPDF `find_tables`; python-pptx `shape.has_table` and a DOCX
+    `w:tbl` element are both exact), and
     `has_code` / `has_equation` are HEURISTICS whose false-positive and
     false-negative modes are documented in ingest/parse.py's module docstring.
     Blueprints filter candidate nodes on these flags (`requires_flags_any`), so a

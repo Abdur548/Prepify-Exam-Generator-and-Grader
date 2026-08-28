@@ -1,5 +1,6 @@
 """
-Document parsing: PDF (PyMuPDF) and PPTX (python-pptx) → TextBlock list.
+Document parsing: PDF (PyMuPDF), PPTX and DOCX (python-pptx / python-docx)
+→ TextBlock list.
 
 Zero LLM calls. Zero heading decisions — that is structure.py's job.
 This module extracts blocks, records their font metadata, and sets the per-block
@@ -9,7 +10,8 @@ Content flags — what is a detector and what is a heuristic:
 
   has_table    DETECTED. PDF: `page.find_tables()`, present in the pinned PyMuPDF
                (1.27.2); a text block whose bbox intersects a detected table's bbox
-               is marked. PPTX: `shape.has_table`, which is exact.
+               is marked. PPTX: `shape.has_table`, which is exact. DOCX: a `w:tbl`
+               body element, which is exact.
   has_code     HEURISTIC. Monospace font name only (config.MONOSPACE_FONT_SUBSTRINGS).
                Prose set in a monospace face is a false positive; code set in a
                proportional face is a false negative. There is no lexical or
@@ -36,18 +38,28 @@ from coursegen import config
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_SUFFIXES = {".pdf", ".pptx", ".ppt"}
+# Suffixes parse_directory PICKS UP — not the same thing as "can be parsed".
+# `.ppt` is scanned deliberately even though it can never be read: dropping it here
+# would make a legacy deck disappear from the corpus without a word. It is scanned so
+# that parse_file can reject it by name with a remedy the user can act on.
+_SCANNED_SUFFIXES = {".pdf", ".pptx", ".ppt", ".docx"}
 
 
 @dataclass
 class TextBlock:
     block_type: Literal["text", "figure"]
     text: str
-    page: int                       # 0-indexed within the document
+    # PDF page / PPTX slide, 0-indexed. DOCX: 1-based BLOCK ORDINAL, because a .docx
+    # has no pages at all — see _parse_docx for why that is not papered over.
+    page: int
     max_font_size: float            # max span font size; 0.0 for figure blocks
     span_font_sizes: list[float]    # all individual span sizes; empty for figures
     source_file: str                # filename only — not full path (S4, node_id stability)
-    is_slide_heading: bool = False  # True for PPTX placeholder types 1 / 3 only
+    # "The format told us this is a heading" — PPTX placeholder type TITLE /
+    # CENTER_TITLE, or a DOCX paragraph style named "Heading …" — as opposed to the
+    # inferred relative-font-size path structure.py runs for PDF, where no such
+    # declaration exists.
+    is_explicit_heading: bool = False
     # Content flags. See the module docstring for detector-vs-heuristic status.
     has_table: bool = False
     has_code: bool = False
@@ -57,29 +69,44 @@ class TextBlock:
 @dataclass
 class ParsedDocument:
     source_file: str                # filename only
-    source_type: Literal["pdf", "pptx"]
+    source_type: Literal["pdf", "pptx", "docx"]
     blocks: list[TextBlock]
+    # PDF pages / PPTX slides. DOCX: the number of blocks, since a .docx has no pages.
     page_count: int
     warnings: list[str]             # pages with no text layer, size warnings, etc.
 
 
 def parse_file(path: Path) -> ParsedDocument:
     """
-    Parse one PDF or PPTX file. Raises ValueError on any hard failure
+    Parse one PDF, PPTX or DOCX file. Raises ValueError on any hard failure
     so the caller (parse_directory) can isolate it (R3).
     """
     _check_file_size(path)
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         return _parse_pdf(path)
-    if suffix in (".pptx", ".ppt"):
+    if suffix == ".pptx":
         return _parse_pptx(path)
+    if suffix == ".docx":
+        return _parse_docx(path)
+    if suffix == ".ppt":
+        # Legacy PowerPoint is a binary OLE2 compound file, NOT an OOXML zip, so
+        # python-pptx cannot read it under any circumstances. Handing it to
+        # _parse_pptx produces an opaque zip error that reads like a corrupt file and
+        # sends the user looking for damage that is not there. Name the format and
+        # the remedy instead; parse_directory's per-file try/except (R3) carries this
+        # message to the log and continues with the rest of the batch.
+        raise ValueError(
+            f"{path.name}: legacy .ppt is not supported (it is a binary format, "
+            "not OOXML, and python-pptx cannot read it); convert it to .pptx and "
+            "re-run."
+        )
     raise ValueError(f"Unsupported file type: {suffix!r} ({path.name})")
 
 
 def parse_directory(source_dir: Path) -> list[ParsedDocument]:
     """
-    Parse all PDF/PPTX files in source_dir.
+    Parse all PDF/PPTX/DOCX files in source_dir.
     One bad file logs an error and is skipped; the batch always completes (R3).
 
     Each file is parsed under a config.PARSE_TIMEOUT_SECONDS watchdog (S3), so one
@@ -98,7 +125,7 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
     """
     candidates = sorted(
         p for p in source_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in _SUPPORTED_SUFFIXES
+        if p.is_file() and p.suffix.lower() in _SCANNED_SUFFIXES
     )
     if not candidates:
         logger.warning("No supported files found in %s", source_dir)
@@ -108,9 +135,11 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
         try:
             doc = _parse_file_with_timeout(path)
             docs.append(doc)
+            # page_count is not a page count for DOCX (there are no pages), so it is
+            # reported by name rather than as "N pages".
             logger.info(
-                "Parsed %s: %d blocks on %d pages",
-                path.name, len(doc.blocks), doc.page_count,
+                "Parsed %s [%s]: %d blocks, page_count=%d",
+                path.name, doc.source_type, len(doc.blocks), doc.page_count,
             )
         except Exception as exc:
             logger.error("Failed to parse %s — skipping: %s", path.name, exc)
@@ -243,10 +272,11 @@ def _parse_pdf(path: Path) -> ParsedDocument:
 # PPTX via python-pptx
 # ---------------------------------------------------------------------------
 
-# Table cell/row joiners. Cell boundaries are preserved rather than flattened to
-# spaces because the chunk text is what an item is later grounded in — "QuickSort
-# | O(n log n)" keeps the row's association readable, "QuickSort O(n log n)" does
-# not. Text, not markup: S5 requires model-facing content to stay inert.
+# Table cell/row joiners, shared by the PPTX and DOCX paths. Cell boundaries are
+# preserved rather than flattened to spaces because the chunk text is what an item is
+# later grounded in — "QuickSort | O(n log n)" keeps the row's association readable,
+# "QuickSort O(n log n)" does not. Text, not markup: S5 requires model-facing content
+# to stay inert.
 _TABLE_CELL_SEP = " | "
 _TABLE_ROW_SEP = "\n"
 
@@ -255,7 +285,7 @@ def _parse_pptx(path: Path) -> ParsedDocument:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 
-    _check_pptx_zip_size(path)
+    _check_ooxml_zip_size(path)
 
     source_file = path.name
     blocks: list[TextBlock] = []
@@ -377,7 +407,7 @@ def _parse_pptx(path: Path) -> ParsedDocument:
                 max_font_size=0.0,      # not used for PPTX heading detection
                 span_font_sizes=[],
                 source_file=source_file,
-                is_slide_heading=is_heading,
+                is_explicit_heading=is_heading,
                 has_code=is_code_font(run_fonts),
                 has_equation=is_equation_content(run_fonts, shape_text),
             ))
@@ -393,6 +423,211 @@ def _parse_pptx(path: Path) -> ParsedDocument:
         page_count=slide_count,
         warnings=warnings,
     )
+
+
+# ---------------------------------------------------------------------------
+# DOCX via python-docx
+# ---------------------------------------------------------------------------
+
+def _parse_docx(path: Path) -> ParsedDocument:
+    """
+    Parse one .docx into TextBlocks.
+
+    Headings are EXACT here, better than either other format: Word stores a real
+    paragraph style, so a style named "Heading …" is the document itself declaring
+    the paragraph a heading. `is_explicit_heading` is set from it and structure.py
+    never runs the PDF font-size inference over a DOCX.
+
+    ⚠ `page` IS A BLOCK ORDINAL, NOT A PAGE NUMBER. A .docx has no pages: pagination
+    does not exist until Word lays the document out against a printer, the style
+    definitions and the installed font metrics, and python-docx cannot compute it.
+    Every block therefore carries its 1-based ordinal within the document. This is a
+    disclosed limitation, not an approximation waiting to be improved: counting
+    explicit page breaks would report "page 1" for the great majority of real
+    documents, which contain none, and a plausible-looking wrong page number in a
+    citation is worse than an honest ordinal. pipeline.md states the consequence for
+    citations; todo.md carries the renderer-side fix (label a DOCX locator "¶12",
+    not "p.12"), which needs the source type available at citation time.
+
+    MAX_PAGES is deliberately NOT applied: there are no pages to count, and applying
+    it to the block count would assert exactly the block==page equivalence this
+    function exists to deny — a 2 000-block cap would also reject a legitimate
+    hundred-page document. The S3 guards that do apply are MAX_FILE_SIZE_BYTES,
+    MAX_DECOMPRESSED_SIZE_BYTES and the per-file PARSE_TIMEOUT_SECONDS watchdog.
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    _check_ooxml_zip_size(path)
+
+    source_file = path.name
+    blocks: list[TextBlock] = []
+    warnings: list[str] = []
+
+    try:
+        document = Document(str(path))
+    except Exception as exc:
+        raise ValueError(f"python-docx could not open {path.name}: {exc}") from exc
+
+    p_tag, tbl_tag = qn("w:p"), qn("w:tbl")
+    figures_by_paragraph = _docx_figures_by_paragraph(document, p_tag)
+    figures_expected = len(document.inline_shapes)
+    figures_placed = 0
+
+    # Walk the body in document ORDER. `document.paragraphs` and `document.tables`
+    # are two separate flat lists, so neither one alone can tell which paragraphs
+    # follow which table — and section boundaries depend on that order.
+    for child in document.element.body.iterchildren():
+        if child.tag == tbl_tag:
+            table_text, cell_fonts = _docx_table_text(Table(child, document))
+            if not table_text:
+                warnings.append(
+                    f"Block {len(blocks) + 1} of {path.name} is a table with no cell "
+                    f"text — has_table is set but the node carries no table content "
+                    f"to ground a question in."
+                )
+            blocks.append(TextBlock(
+                block_type="text",
+                text=table_text,
+                page=len(blocks) + 1,
+                max_font_size=0.0,      # DOCX headings come from styles, not sizes
+                span_font_sizes=[],
+                source_file=source_file,
+                has_table=True,         # exact: a w:tbl element is a table
+                has_code=is_code_font(cell_fonts),
+                has_equation=is_equation_content(cell_fonts, table_text),
+            ))
+            continue
+
+        if child.tag != p_tag:
+            continue                    # sectPr, bookmarks — no content of their own
+
+        para = Paragraph(child, document)
+        # Normalise whitespace: a paragraph may carry tabs and soft breaks, and
+        # _TABLE_ROW_SEP only stays meaningful if a stray newline cannot appear in a
+        # non-table block.
+        text = " ".join(para.text.split())
+        run_fonts = [r.font.name for r in para.runs if r.font.name]
+
+        if text:
+            blocks.append(TextBlock(
+                block_type="text",
+                text=text,
+                page=len(blocks) + 1,
+                max_font_size=0.0,
+                span_font_sizes=[],
+                source_file=source_file,
+                is_explicit_heading=_is_docx_heading(para),
+                has_code=is_code_font(run_fonts),
+                has_equation=is_equation_content(run_fonts, text),
+            ))
+
+        for _ in range(figures_by_paragraph.get(child, 0)):
+            blocks.append(TextBlock(
+                block_type="figure",
+                text="",
+                page=len(blocks) + 1,
+                max_font_size=0.0,
+                span_font_sizes=[],
+                source_file=source_file,
+            ))
+            figures_placed += 1
+
+    if figures_placed != figures_expected:
+        # R10: never silently drop content. An inline shape anchored somewhere the
+        # body walk does not visit (a header, a footnote, a table cell) would
+        # otherwise under-report has_figure with no trace.
+        warnings.append(
+            f"{path.name}: {figures_expected} inline shapes reported by python-docx "
+            f"but {figures_placed} placed as figure blocks — has_figure may be "
+            f"under-reported."
+        )
+
+    if not blocks:
+        warnings.append(f"{path.name} has no paragraph, table or image content.")
+
+    return ParsedDocument(
+        source_file=source_file,
+        source_type="docx",
+        blocks=blocks,
+        page_count=len(blocks),   # block count — a .docx has no pages
+        warnings=warnings,
+    )
+
+
+def _is_docx_heading(paragraph: object) -> bool:
+    """
+    EXACT, not a heuristic: a paragraph style named with
+    config.DOCX_HEADING_STYLE_PREFIX ("Heading 1" … "Heading 9") is the format
+    declaring this paragraph a heading. No font-size inference is used for DOCX.
+    """
+    style = getattr(paragraph, "style", None)
+    name = getattr(style, "name", None) or ""
+    return name.startswith(config.DOCX_HEADING_STYLE_PREFIX)
+
+
+def _docx_figures_by_paragraph(document: object, p_tag: str) -> dict[object, int]:
+    """
+    Map each of `document.inline_shapes` to the `w:p` element that contains it.
+
+    `inline_shapes` is the authoritative list of embedded images but carries no
+    position, and a figure block placed in the wrong section flags the wrong node —
+    `requires_flags_any: ["has_figure"]` would then pick a section that has no
+    figure. Walking up from the shape's `wp:inline` element restores the position.
+    The caller cross-checks placed against expected and records a warning on any
+    mismatch rather than quietly losing a shape.
+    """
+    counts: dict[object, int] = {}
+    for shape in document.inline_shapes:
+        node = shape._inline        # no public accessor for a shape's own element
+        while node is not None and node.tag != p_tag:
+            node = node.getparent()
+        if node is not None:
+            counts[node] = counts.get(node, 0) + 1
+    return counts
+
+
+def _docx_table_text(table: object) -> tuple[str, list[str]]:
+    """
+    Row-major text of a DOCX table plus the run font names inside it, joined with the
+    same _TABLE_CELL_SEP / _TABLE_ROW_SEP the PPTX path uses so a row's associations
+    survive into the grounding span.
+
+    Merged cells behave the OPPOSITE way to python-pptx: python-docx resolves every
+    spanned position to the SAME `w:tc` element and repeats its text there, where
+    python-pptx returns "". A naive rows × columns walk therefore prints the merged
+    text once per spanned position instead of emitting a blank. Cells are
+    de-duplicated by `w:tc` identity across the whole table, which covers horizontal
+    and vertical merges alike. The seen-list holds the element proxies, which keeps
+    lxml's proxy identity stable for the `is` comparison.
+    """
+    rows_out: list[str] = []
+    fonts: list[str] = []
+    seen_tc: list[object] = []
+
+    for r_idx in range(len(table.rows)):
+        cells: list[str] = []
+        for c_idx in range(len(table.columns)):
+            cell = table.cell(r_idx, c_idx)
+            tc = cell._tc          # no public accessor for a cell's own element
+            if any(tc is seen for seen in seen_tc):
+                continue
+            seen_tc.append(tc)
+            # Collapse intra-cell newlines so _TABLE_ROW_SEP stays meaningful as the
+            # row boundary.
+            cell_text = " ".join(cell.text.split())
+            if cell_text:
+                cells.append(cell_text)
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    if run.font.name:
+                        fonts.append(run.font.name)
+        if cells:
+            rows_out.append(_TABLE_CELL_SEP.join(cells))
+
+    return _TABLE_ROW_SEP.join(rows_out), fonts
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +740,12 @@ def _check_file_size(path: Path) -> None:
         )
 
 
-def _check_pptx_zip_size(path: Path) -> None:
+def _check_ooxml_zip_size(path: Path) -> None:
+    """
+    Zip-bomb guard for any OOXML container. PPTX and DOCX are both zips, and the
+    decompression ratio risk is identical, so the check is shared rather than
+    duplicated (it was `_check_pptx_zip_size` while PPTX was the only zip format).
+    """
     try:
         with zipfile.ZipFile(path) as zf:
             total = sum(info.file_size for info in zf.infolist())
@@ -515,4 +755,4 @@ def _check_pptx_zip_size(path: Path) -> None:
                 f"MAX_DECOMPRESSED_SIZE_BYTES={config.MAX_DECOMPRESSED_SIZE_BYTES}"
             )
     except zipfile.BadZipFile as exc:
-        raise ValueError(f"{path.name} is not a valid ZIP/PPTX: {exc}") from exc
+        raise ValueError(f"{path.name} is not a valid OOXML zip: {exc}") from exc

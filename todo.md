@@ -453,6 +453,65 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
+## Ingest fixes — `.ppt`, `.docx`, chunk page precision  [SHIPPED — uncommitted 2026-08-28]
+
+- [x] **`.ppt` rejected by name, not by accident.** It was in the scanned set and dispatched to
+      `_parse_pptx`, where python-pptx threw an opaque zip error that `parse_directory` logged
+      as a generic parse failure — it read as a corrupt file rather than an unsupported format.
+      `.ppt` is still scanned (so a legacy deck never vanishes silently) and `parse_file` now
+      raises `ValueError` naming the format and the remedy: "legacy .ppt is not supported (it is
+      a binary format, not OOXML...); convert it to .pptx and re-run."
+- [x] **`.docx` ingestion.** `python-docx` added to `pyproject.toml` (authorised). `_parse_docx`
+      emits the same `TextBlock` list, sets all four content flags, and extracts table cell text
+      with the same `_TABLE_CELL_SEP` / `_TABLE_ROW_SEP` as the PPTX path.
+- [x] **`is_slide_heading` → `is_explicit_heading`**, driven by DOCX becoming the second format
+      to set it. Means "the format told us this is a heading" (PPTX placeholder type / DOCX
+      paragraph style) as opposed to PDF's inferred font-size path.
+- [x] **`chunk.page` is now the page of the first block that contributed to that chunk**, not
+      `section.page_start`. Chunk IDs — and therefore Qdrant point IDs — changed by design; a
+      previously built index is stale and must be re-ingested.
+
+### Open — carried into P4/P5
+
+- [ ] **The renderer must label DOCX locators differently.** A `.docx` has no pages, so
+      `chunk.page` for a DOCX is a **1-based block ordinal**: a citation reading "page 12"
+      means the twelfth block, not the twelfth printed page. The renderer and the chat citation
+      path should print `¶12` for a DOCX and `p.12` for a PDF/PPTX, which needs the **source
+      type available at citation time** — `Chunk` / the Qdrant payload / `RetrievedChunk` carry
+      `file` and `page` but not `source_type`. No page-estimation heuristic is to be added:
+      counting explicit page breaks is wrong for the majority of documents that contain none,
+      and a plausible-but-wrong page number is worse than an honest ordinal.
+- [ ] **DOCX heading nesting is unresolved, deliberately.** Word style names carry a level
+      ("Heading 1" vs "Heading 2") and could produce a nested heading path the way the PDF
+      font-size path does. `TextBlock` carries no level and nothing in the change asked for
+      nesting, so DOCX heading paths are **flat**, one entry per section — the same shape the
+      PPTX path produces. Recorded rather than invented; needs a human decision plus a new
+      block field if nesting is wanted.
+
+### Discovered while fixing chunk pages — NOT fixed, out of scope
+
+- [x] **`_extract_pdf_sections` never assigned `page_start` — FIXED 2026-08-28 by the reviewer.**
+      In `ingest/structure.py` the closure `flush()` read a `page_start` variable initialised to
+      `0` and never reassigned, while the loop maintained a separate `current_page_start` that
+      nothing read. Every PDF leaf section reported `page_start = 0`, so every PDF node carried
+      `CourseMapNode.page_span = (0, page_end)`. Found by the ingest-fix agent and deferred as
+      out of scope; fixed here because it is the same defect class as the chunk-page work that
+      authorised the change. Verified: a three-chapter PDF now yields `page_start` 0/1/2 where
+      it previously yielded 0/0/0. `TestPDFSectionPageStart` covers it.
+      **Worth remembering why review missed this:** the wrong value was perfectly
+      *deterministic*, so the P1 idempotency gate passed on it every time. Determinism tests
+      prove a value is stable, never that it is right.
+- [ ] **Repeated heading text inside ONE document collides on `node_id`.**
+      `node_id = sha1(source_file + "|" + "/".join(path))` and both explicit-heading paths emit
+      FLAT single-entry paths, so two sections in the same file under headings with identical
+      text ("Summary", "Exercises") produce the same `node_id` and appear twice in the course
+      map. Pre-existing — two PPTX slides with the same title already do this — but a DOCX makes
+      it likelier, since repeated section headings are ordinary in prose documents. Not
+      introduced by this change and not fixed in it; the fix (an ordinal or the parent path in
+      the hash) changes every node ID and needs its own decision.
+
+---
+
 ## Discovered mid-phase (do NOT do now)
 
 - `coursegen/contracts/course_map.py` imports `Field` from pydantic without using it. Harmless;

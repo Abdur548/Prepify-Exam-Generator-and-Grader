@@ -144,6 +144,23 @@ def malformed_pdf(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def legacy_ppt(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """
+    A file carrying the legacy `.ppt` extension.
+
+    Its contents are deliberately irrelevant: `.ppt` is a binary OLE2 compound file,
+    not an OOXML zip, so python-pptx can never read one. The parser must reject it on
+    the suffix with an actionable message rather than letting python-pptx fail
+    opaquely — which reads like a corrupt file and sends the user hunting for damage
+    that is not there. The bytes below are the real OLE2 magic number so the fixture
+    is not merely garbage.
+    """
+    path = tmp_path_factory.mktemp("legacy") / "old_deck.ppt"
+    path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64)
+    return path
+
+
+@pytest.fixture(scope="session")
 def minimal_pptx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Two-slide PPTX with title placeholders."""
     from pptx import Presentation
@@ -288,6 +305,56 @@ def math_pptx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     slide.shapes.add_picture(str(png_path), Inches(1), Inches(2), Inches(1), Inches(1))
 
     prs.save(str(path))
+    return path
+
+
+@pytest.fixture(scope="session")
+def structured_docx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """
+    DOCX carrying every signal `_parse_docx` reads: real "Heading 1" / "Heading 2"
+    paragraph styles, body prose, a populated table, a Consolas run, Unicode
+    mathematics and an inline image.
+
+    Heading styles are the point of the fixture. DOCX is the only one of the three
+    formats where a heading is a FACT rather than an inference — `paragraph.style.name`
+    is set by Word — so the test asserts exact heading text, not a fraction below a
+    threshold as the PDF path must.
+    """
+    from docx import Document
+    from docx.shared import Inches
+
+    tmp_dir = tmp_path_factory.mktemp("docx")
+    path = tmp_dir / "structured.docx"
+    png_path = tmp_dir / "dot.png"
+    png_path.write_bytes(_tiny_png_bytes())
+
+    document = Document()
+    document.add_heading("Chapter 1: Sorting Algorithms", level=1)
+    document.add_paragraph(
+        "Sorting arranges elements into a defined order and underpins searching, "
+        "deduplication and a great many database operations."
+    )
+
+    document.add_heading("1.1 QuickSort", level=2)
+    code_run = document.add_paragraph().add_run(
+        "def quicksort(items): return items"
+    )
+    code_run.font.name = "Consolas"
+    document.add_paragraph(
+        "For all ∀x ∈ S the recurrence ∑ T(n) ≤ ∞ bounds "
+        "the expected work."
+    )
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Algorithm"
+    table.cell(0, 1).text = "Complexity"
+    table.cell(1, 0).text = "QuickSort"
+    table.cell(1, 1).text = "O(n log n)"
+
+    document.add_heading("1.2 Architecture Diagram", level=2)
+    document.add_paragraph().add_run().add_picture(str(png_path), width=Inches(1))
+
+    document.save(str(path))
+    png_path.unlink()   # keep only the parseable document in the fixture directory
     return path
 
 
