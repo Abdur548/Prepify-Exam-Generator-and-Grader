@@ -10,7 +10,7 @@
 | P2 | Solver on real data | PASS | `pytest tests/test_p2_solver_real.py -v` | 2026-08-28 |
 | P2 | `allocation_fidelity` instrumentation | PASS | `python -m pytest` + `python -m coursegen --dry-run` | 2026-08-28 |
 | P3 | Generation + validation | PASS | `pytest tests/test_p3_generation_validation.py -v` | 2026-08-28 |
-| P4 | Render + chat | NOT STARTED | | |
+| P4 | Render + chat | PARTIAL | `pytest tests/test_p4_render_chat.py -v` PASS; real `import weasyprint` FAILED | 2026-08-28 |
 | P5 | UI + resilience | NOT STARTED | | |
 | P6 | Evaluation + baseline | NOT STARTED | | |
 | P7 | Hardening + rehearsal | NOT STARTED | | |
@@ -1111,3 +1111,158 @@ production rather than allowing them to be `None`? Skipping is now recorded rath
 which fixes the reported defect, but §9.5 defines validation as four gates — arguably a
 production run should not be able to skip two of them at all. Left as a design call rather than
 decided unilaterally.
+
+---
+
+## P4 — Render + chat
+
+**Status:** PARTIAL — dependency-free P4 code is implemented and tested; the real PDF artifact gate is blocked by missing WeasyPrint native GTK/Pango runtime on this machine.
+
+**Built:**
+- `exam/render.py` — Jinja2 autoescaped HTML for exam, answer key and coverage table; PDF writing through WeasyPrint as a thin final step; explicit `check_weasyprint_available()` pre-flight.
+- `retrieve/hybrid.py` — Qdrant dense+sparse prefetch with RRF fusion, `RETRIEVE_TOP_K` limit.
+- `retrieve/rerank.py` — injected cross-encoder scorer, top-`RERANK_TOP_K` sort, threshold-based retrieve/skip decision.
+- `chat/answer.py` — grounded chat path, top-`SEND_TOP_K` context cap, last-`CHAT_MAX_TURNS` history only, file+page citations, not-from-your-material fallback.
+- `README.md` — WeasyPrint/GTK native prerequisite documented next to S8.
+- `tests/test_p4_render_chat.py` — 8 TDD tests.
+
+**Files touched:**
+`exam/render.py`, `retrieve/hybrid.py`, `retrieve/rerank.py`, `chat/answer.py`,
+`tests/test_p4_render_chat.py`, `README.md`, `pipeline.md`, `progress.md`
+
+**Deviations from spec:**
+- Real PDF generation is not passing because GTK/Pango native libraries are absent. HTML generation is working; tests use an injected fake PDF writer to prove artifact wiring and escaping. P4 cannot be marked PASS until real WeasyPrint can import and write PDFs.
+- `RERANKER_THRESHOLD` was not recalibrated from real cross-encoder logits in this pass. The code supports threshold-based skip; calibration remains open and must be measured before P4 PASS.
+
+**TDD RED command:**
+```
+$ python -m pytest tests/test_p4_render_chat.py -q
+FFFFFFFF                                                                 [100%]
+... failures: P4 render module missing; P4 retrieve modules missing
+```
+**Result:** expected RED — P4 modules/APIs were absent.
+
+**Dependency-free P4 gate command:**
+```
+$ python -m pytest tests/test_p4_render_chat.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: E:\Qoder\prepify
+configfile: pyproject.toml
+plugins: anyio-4.12.0, mock-3.15.1
+collected 8 items
+
+tests\test_p4_render_chat.py ........                                    [100%]
+
+============================== 8 passed in 1.73s ==============================
+```
+**Result:** PASS for dependency-free P4 code.
+
+**Full suite after P4 code:**
+```
+$ python -m pytest
+........................................................................ [ 80%]
+....................................                                     [100%]
+180 passed in 11.05s
+```
+**Result:** PASS.
+
+**Real WeasyPrint/PDF prerequisite check:**
+```
+$ python - <<'PY'
+import weasyprint
+print('weasyprint import ok')
+PY
+-----
+
+WeasyPrint could not import some external libraries. Please carefully follow the installation steps before reporting an issue:
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#troubleshooting 
+
+-----
+
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "<user site-packages>\weasyprint\__init__.py", line 371, in <module>
+    from .css import preprocess_stylesheet  # noqa: I001, E402
+  File "<user site-packages>\weasyprint\css\__init__.py", line 29, in <module>
+    from ..text.fonts import FontConfiguration
+  File "<user site-packages>\weasyprint\text\fonts.py", line 17, in <module>
+    from .constants import (  # isort:skip
+  File "<user site-packages>\weasyprint\text\constants.py", line 5, in <module>
+    from .ffi import pango
+  File "<user site-packages>\weasyprint\text\ffi.py", line 476, in <module>
+    gobject = _dlopen(
+  File "<user site-packages>\weasyprint\text\ffi.py", line 464, in _dlopen
+    return ffi.dlopen(names[0], flags)  # pragma: no cover
+  File "<user site-packages>\cffi\api.py", line 150, in dlopen
+    lib, function_cache = _make_ffi_library(self, name, flags)
+  File "<user site-packages>\cffi\api.py", line 834, in _make_ffi_library
+    backendlib = _load_backend_lib(backend, libname, flags)
+  File "<user site-packages>\cffi\api.py", line 829, in _load_backend_lib
+    raise OSError(msg)
+OSError: cannot load library 'libgobject-2.0-0': error 0x7e.  Additionally, ctypes.util.find_library() did not manage to locate a library called 'libgobject-2.0-0'
+```
+**Result:** FAILED — P4 remains PARTIAL until GTK/Pango native runtime is installed and real PDF artifacts can be produced.
+
+**Post-phase verification:**
+- [x] Jinja2 autoescape renders `<script>` as text, not markup.
+- [x] Coverage table includes `coverage_ratio`, `fill_ratio`, `allocation_fidelity`, `slots_by_fallthrough`, and unfilled slots.
+- [x] Answer key uses MCQ option labels as authoritative.
+- [x] Hybrid retrieval sends dense and sparse prefetches and `RETRIEVE_TOP_K = 10`.
+- [x] Rerank sorts to `RERANK_TOP_K = 5` and threshold decides retrieve/skip.
+- [x] Chat with relevant material returns file+page citation and sends exactly `SEND_TOP_K = 4` contexts.
+- [x] Chat with low reranker score returns explicit not-from-your-material path.
+- [x] Chat history capped to last `CHAT_MAX_TURNS = 6` turns.
+
+**Known issues carried forward:**
+- Install/verify WeasyPrint native GTK/Pango runtime before P4 PASS.
+- Calibrate `RERANKER_THRESHOLD` against measured cross-encoder logits before P4 PASS.
+
+### Reviewer corrections applied before P4 was committed (2026-08-28)
+
+**1. Chat cited one of the four contexts it actually sent.**
+`answer_question` built `citations = _unique_citations(contexts[:1])` while sending all
+`SEND_TOP_K = 4` chunks to the model. The answer is composed from four sources while the UI
+names one, so whenever it draws on the second, third or fourth chunk — the normal case, or
+there would be no reason to send four — the displayed citation points at material that does
+not contain the claim. A citation that reads as authoritative and is wrong is worse than no
+citation, and this is the fifth instance in this project of an artifact that reads as verified
+when it was not.
+
+A telling detail: `_unique_citations` already deduplicates by `(file, page)`, and that dedupe
+only earns its keep on a multi-chunk list — which suggests `[:1]` was a late narrowing rather
+than the design.
+
+Fixed to cite `contexts`. Deduplication keeps the rendered list usually shorter than
+`SEND_TOP_K`. P4's gate ("an answer with a file and page citation") is satisfied either way;
+citing what was actually sent is the honest version. If four citations reads as noisy, that is
+a P5 presentation problem, not a reason to under-report provenance.
+
+*Test change:* `test_relevant_query_answers_with_file_and_page_citation` asserted
+`citations == [{"file": "slides.pptx", "page": 1}]`, encoding the narrowing as expected
+behaviour. Its fixture supplies six chunks on pages 1–6, so the four sent are pages 1–4. The
+assertion now names all four and adds `len(citations) == sent_context_count`; a second test
+covers dedupe (four chunks across two pages → two citations). Strictly stronger; nothing
+weakened.
+
+**2. Personal path re-leaked into a pasted traceback (S9).**
+The WeasyPrint failure was pasted verbatim, reintroducing an absolute
+`C:\Users\<name>\AppData\...` path — nine occurrences. The same leak was redacted in `002e2c6`,
+and the repository is now public on GitHub, so this would have shipped on the next push.
+Redacted again, with the error text preserved. Worth automating: pasted tracebacks carry
+machine paths by default, so redaction needs to be a habit rather than a catch.
+
+**Also noted, not changed:** the `SEND_TOP_K` guard is unreachable —
+`contexts = reranked[:SEND_TOP_K]` cannot exceed `SEND_TOP_K`, so `if len(contexts) >
+SEND_TOP_K: raise` can never fire. Harmless, but it does not assert what L9 asks for; the
+meaningful guard is on what `_messages_with_material` embeds. Logged in `todo.md`.
+
+**Gate command:**
+```
+$ python -m pytest
+........................................................................ [ 79%]
+.....................................                                    [100%]
+181 passed in 12.54s
+```
+**Result:** PASS (P4 stays PARTIAL — the WeasyPrint blocker is unrelated to these fixes)

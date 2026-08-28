@@ -399,33 +399,57 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ### Carried into P4
 
-- [ ] **The renderer must use the option labels as authoritative**, not re-derive them from list
+- [x] **The renderer must use the option labels as authoritative**, not re-derive them from list
       position. They now agree, so either works — but only because the shuffle relabels. If that
       ever changes, position-based labelling silently corrupts the answer key.
-- [ ] **`allocation_fidelity` must appear in the rendered coverage table** alongside
+- [x] **`allocation_fidelity` must appear in the rendered coverage table** alongside
       `coverage_ratio` and `fill_ratio` (carried from the P2 review).
 
 ---
 
-## P4 — Render + chat
+## P4 — Render + chat  [PARTIAL — code tests PASS 2026-08-28; PDF gate blocked by GTK]
 
 - [ ] **Calibrate `RERANKER_THRESHOLD` against measured cross-encoder logits** — same issue and
-      same model as `GROUNDEDNESS_TAU` above.
-- [ ] **Verify `weasyprint` imports on Windows** before relying on it. It needs GTK/Pango
-      native libraries, a known Windows install cliff. Check this early — discovering it during
-      the P7 rehearsal would be too late.
-- [ ] Renderer and coverage view must display `fill_ratio` alongside `coverage_ratio` and must
-      surface `unfilled_slots` — `coverage_ratio` alone can read 1.00 on an incomplete paper.
-- [ ] **The rendered coverage table must show `allocation_fidelity` next to `coverage_ratio`
-      and `fill_ratio`** — all three, together. They answer three different questions and they
-      disagree on the real course map: `final_default` reads `coverage_ratio 1.000`,
-      `fill_ratio 1.000`, `allocation_fidelity 0.625`. **A table showing only the first two
-      would repeat exactly the blindness the instrumentation pass exists to remove** — a paper
-      presented as fully covered and fully filled, with 12 of its 32 questions placed by span
-      exhaustion rather than by `instructional_mass`. Show `slots_by_fallthrough` too; the
-      count is what makes the ratio actionable.
-- [ ] Server must run single-worker (`--workers 1`) — `QdrantClient(path=...)` takes an
-      exclusive file lock (security requirement S8, see `README.md`)
+      same model as `GROUNDEDNESS_TAU` above. Code supports threshold-based routing, but the
+      current value is still uncalibrated and must be measured before P4 PASS.
+- [x] **Verify `weasyprint` imports on Windows** before relying on it. It fails on this machine:
+      missing `libgobject-2.0-0` / GTK/Pango native runtime. README prerequisite added.
+- [x] Renderer and coverage view display `fill_ratio` alongside `coverage_ratio` and surface
+      `unfilled_slots`.
+- [x] **The rendered coverage table shows `allocation_fidelity` next to `coverage_ratio`
+      and `fill_ratio`**, plus `slots_by_fallthrough`.
+- [x] Server single-worker note remains in README (`--workers 1`) for S8.
+- [x] Jinja2 autoescape protects model output; `<script>` renders as text, not markup.
+- [x] Answer key uses MCQ option labels as authoritative.
+- [x] Hybrid retrieval issues dense+sparse prefetch with RRF and `RETRIEVE_TOP_K = 10`.
+- [x] Chat sends top `SEND_TOP_K = 4` contexts, cites file+page, and caps history to last
+      `CHAT_MAX_TURNS = 6` turns.
+- [x] Low reranker score returns explicit "not from your material" path.
+- [ ] Install/verify WeasyPrint GTK/Pango runtime on the demo machine, then rerun the real PDF
+      artifact gate. Until then P4 is PARTIAL, not PASS.
+
+---
+
+## P4 review — reviewer corrections  [COMPLETE — shipped with P4, 2026-08-28]
+
+- [x] **Chat cited one of the four contexts it sent.** `citations = _unique_citations(contexts[:1])`
+      while all `SEND_TOP_K = 4` chunks went to the model, so an answer drawing on chunk 2, 3 or
+      4 displayed a citation pointing at material that does not contain the claim. Now cites
+      `contexts`; dedupe by `(file, page)` keeps the list short. Fifth instance in this project
+      of an artifact that reads as verified when it was not.
+- [x] **Personal path re-leaked into a pasted traceback (S9).** The WeasyPrint failure was
+      pasted verbatim with nine `C:\Users\<name>\...` occurrences. Same leak was redacted in
+      `002e2c6`; the repo is now public, so it would have shipped on the next push. Redacted
+      with the diagnostic text preserved.
+
+- [ ] **Redacting pasted output needs to be a habit, not a catch.** Tracebacks and pytest
+      headers carry machine paths by default, and §2.4 requires pasting output verbatim — the
+      two pull against each other. Twice now the leak arrived via honest evidence-pasting.
+      Worth a pre-commit grep for `C:\\Users\\` and `/home/` before P7.
+- [ ] **`SEND_TOP_K` guard is unreachable** — `contexts = reranked[:SEND_TOP_K]` cannot exceed
+      `SEND_TOP_K`, so `if len(contexts) > SEND_TOP_K: raise` never fires. Not a defect, but it
+      does not assert what L9 asks for. The meaningful guard is on what
+      `_messages_with_material` actually embeds in the prompt. Low priority.
 
 ---
 

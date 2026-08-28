@@ -1,6 +1,6 @@
 # Current Pipeline
 
-_Last updated: 2026-08-28 · phase: P3 (generation + validation)_
+_Last updated: 2026-08-28 · phase: P4 (render + chat partial)_
 
 ## Flow
 
@@ -149,7 +149,18 @@ tune it by watching the demo.
 - **Status:** implemented with mocked LLM tests (P3)
 
 ### Render + Chat
-- **Status:** not started (P4)
+- **Input:** `list[GeneratedItem]`, `CoverageReport`, and chat query/history
+- **Output:** exam HTML/PDF, answer-key HTML/PDF, coverage HTML; `ChatAnswer` with citations or not-from-material marker
+- **Modules:** `exam/render.py`, `retrieve/hybrid.py`, `retrieve/rerank.py`, `chat/answer.py`
+- **LLM calls:** chat makes one LLM call per answer; retrieval/skip is decided by reranker score, never an LLM router
+- **Key parameters:** `RETRIEVE_TOP_K = 10`, `RERANK_TOP_K = 5`, `SEND_TOP_K = 4`, `CHAT_MAX_TURNS = 6`, `RERANKER_THRESHOLD = 0.5` (raw cross-encoder logit, still uncalibrated)
+- **Security:** Jinja2 autoescape enabled; model output is never marked safe. Source contexts in chat prompts are delimited as data.
+- **Citations cover every context that was sent**, not only the top-ranked one. The model
+  answers from all `SEND_TOP_K` chunks, so citing one names a source the claim may not have
+  come from — a citation that reads as authoritative and is wrong. `_unique_citations`
+  collapses repeats by `(file, page)`, so the rendered list is usually shorter than
+  `SEND_TOP_K`.
+- **Status:** partial (HTML/render/chat code implemented and tested; real PDF artifact gate blocked by missing WeasyPrint GTK/Pango native runtime; reranker threshold still needs measured calibration)
 
 ### UI
 - **Status:** not started (P5)
@@ -256,3 +267,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-27 | this commit | `TestParseTimeout` threshold 0.2s → 1.0s | Real parse is 50–96 ms, so ~2× headroom; under suite load the healthy file timed out too and the gate failed intermittently | P1 follow-up |
 | 2026-08-28 | uncommitted | `CoverageReport` gains `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity`; `build_report` asserts `by_mass + by_fallthrough == slots_filled` | `final_default` reported `coverage_ratio 1.000` and `fill_ratio 1.000` while 38% of its slots were placed by span exhaustion, not by mass. Measurement only — allocation behaviour unchanged, `solve()` byte-identical | P2 instrumentation |
 | 2026-08-28 | uncommitted | `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`, mocked P3 tests | Batched schema-constrained generation with cache, validation gates and manifest | P3 |
+| 2026-08-28 | uncommitted | `exam/render.py`, `retrieve/hybrid.py`, `retrieve/rerank.py`, `chat/answer.py`, P4 tests | HTML render, coverage table, hybrid retrieval/rerank and chat path; PDF gate blocked by missing GTK | P4 partial |

@@ -22,6 +22,23 @@ Do not raise `--workers`, and do not let a process manager (systemd, a Procfile,
 `CMD`) fork additional workers. Without this, the failure surfaces as an apparently random
 startup crash — the kind that shows up for the first time on the demo machine.
 
+## Native prerequisite — WeasyPrint PDF output
+
+Prepify renders exam and answer-key PDFs through WeasyPrint. On Windows, `pip install
+weasyprint` is not enough: WeasyPrint also needs the GTK/Pango native runtime available to
+the process. Verify the demo machine before P7:
+
+```
+python - <<'PY'
+import weasyprint
+print('weasyprint import ok')
+PY
+```
+
+If this import fails with a missing `libgobject-2.0-0` / GTK / Pango library, install the
+WeasyPrint Windows native prerequisites before attempting PDF generation. The application
+pre-flight should fail at startup with this message rather than mid-generation.
+
 ## Install
 
 ```
