@@ -41,6 +41,8 @@ def solve(
     all_items: list[ItemSpec] = []
     all_warnings: list[str] = []
     all_unfilled: list[str] = []
+    all_by_mass = 0
+    all_by_fallthrough = 0
 
     node_slot_map: dict[str, list[str]] = defaultdict(list)
     node_marks_map: dict[str, int] = defaultdict(int)
@@ -56,7 +58,7 @@ def solve(
         key=lambda i: (0 if blueprint.sections[i].requires_flags_any else 1, i),
     )
 
-    solved: dict[int, tuple[list[ItemSpec], list[str], list[str]]] = {}
+    solved: dict[int, tuple[list[ItemSpec], list[str], list[str], int, int]] = {}
     for i in solve_order:
         solved[i] = _solve_section(
             section=blueprint.sections[i],
@@ -70,10 +72,12 @@ def solve(
     # Solving order and emission order are two different things — the rendered paper
     # (P4) must still read A, B, C.
     for i in range(len(blueprint.sections)):
-        items, warnings, unfilled = solved[i]
+        items, warnings, unfilled, by_mass, by_fallthrough = solved[i]
         all_items.extend(items)
         all_warnings.extend(warnings)
         all_unfilled.extend(unfilled)
+        all_by_mass += by_mass
+        all_by_fallthrough += by_fallthrough
 
     report = build_report(
         blueprint_id=blueprint.blueprint_id,
@@ -83,6 +87,8 @@ def solve(
         unfilled_slots=all_unfilled,
         warnings=all_warnings,
         slots_total=sum(s.count for s in blueprint.sections),
+        slots_by_mass=all_by_mass,
+        slots_by_fallthrough=all_by_fallthrough,
     )
     return all_items, report
 
@@ -97,9 +103,16 @@ def _solve_section(
     used_spans: set[str],
     node_slot_map: dict[str, list[str]],
     node_marks_map: dict[str, int],
-) -> tuple[list[ItemSpec], list[str], list[str]]:
+) -> tuple[list[ItemSpec], list[str], list[str], int, int]:
+    """Returns (items, warnings, unfilled, slots_by_mass, slots_by_fallthrough).
+
+    The last two are measurement only. They are counted where the fill decision
+    is already made and change nothing about how it is made.
+    """
     warnings: list[str] = []
     unfilled: list[str] = []
+    by_mass = 0
+    by_fallthrough = 0
 
     # Step 1: filter candidates by required flags.
     candidates = [
@@ -115,7 +128,7 @@ def _solve_section(
         unfilled.extend(
             f"{section.section_id}-{i + 1:02d}" for i in range(section.count)
         )
-        return [], warnings, unfilled
+        return [], warnings, unfilled, by_mass, by_fallthrough
 
     # Step 2: renormalise mass over the candidate set.
     total_mass = sum(n.instructional_mass for n in candidates)
@@ -151,8 +164,10 @@ def _solve_section(
         # Decrement deficit only when filling from a deficit-allocated node.
         if deficit.get(chosen_nid, 0) > 0:
             deficit[chosen_nid] -= 1
+            by_mass += 1
         else:
             # Fallback node (deficit already zero).
+            by_fallthrough += 1
             warnings.append(
                 f"Section {section.section_id!r}: allocated nodes span-exhausted; "
                 f"falling through to node {chosen_nid!r}."
@@ -206,7 +221,7 @@ def _solve_section(
         node_slot_map[node.node_id].append(slot_id)
         node_marks_map[node.node_id] += section.marks_each
 
-    return items, warnings, unfilled
+    return items, warnings, unfilled, by_mass, by_fallthrough
 
 
 def _pick_node(

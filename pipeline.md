@@ -1,6 +1,6 @@
 # Current Pipeline
 
-_Last updated: 2026-08-27 · phase: P1 (post-review corrective pass)_
+_Last updated: 2026-08-28 · phase: P2 (allocation-fidelity instrumentation)_
 
 ## Flow
 
@@ -143,17 +143,54 @@ tune it by watching the demo.
 | `GeneratedItem` | `contracts/item.py` | `exam/generate.py` (P3) | `exam/validate.py`, `exam/render.py` (P4) |
 | `CoverageReport` | `contracts/coverage.py` | `exam/coverage.py` (P2) | `exam/render.py` (P4), `app/` (P5) |
 
-### `CoverageReport` — two different ratios, do not confuse them
+### `CoverageReport` — three different ratios, do not confuse them
 
-| Field | Meaning |
+| Field | Question it answers |
 |---|---|
-| `nodes_total` / `nodes_covered` / `coverage_ratio` | How much of the **syllabus** the paper touches. `coverage_ratio = nodes_covered / nodes_total`. |
-| `slots_total` / `slots_filled` / `fill_ratio` | How much of the **paper** actually exists. `slots_total = sum(section.count)`, `slots_filled = slots_total - len(unfilled_slots)`, `fill_ratio = slots_filled / slots_total` (0.0 when `slots_total == 0`). |
+| `nodes_total` / `nodes_covered` / `coverage_ratio` | How much of the **syllabus** was touched. `coverage_ratio = nodes_covered / nodes_total`. |
+| `slots_total` / `slots_filled` / `fill_ratio` | How much of the **paper** got filled. `slots_total = sum(section.count)`, `slots_filled = slots_total - len(unfilled_slots)`, `fill_ratio = slots_filled / slots_total` (0.0 when `slots_total == 0`). |
+| `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity` | How much of the paper was placed **by mass** rather than by exhaustion. `allocation_fidelity = slots_by_mass / slots_filled` (0.0 when `slots_filled == 0`). |
+
+These are three different questions and **they can disagree** — they already do.
 
 `coverage_ratio` counts nodes *touched*, not slots *filled*: a paper missing 4 of 22
 questions can still report `coverage_ratio = 1.00`. **`fill_ratio` is the field that proves
-the paper is complete**, and it is the one the P4 renderer and P5 UI must display alongside
-coverage. `slots_filled` always equals the number of `ItemSpec` emitted.
+the paper is complete.** `slots_filled` always equals the number of `ItemSpec` emitted.
+
+`allocation_fidelity` is the field that proves the paper was *allocated*, not merely
+completed. The solver fills a slot down one of exactly two branches in `_solve_section`:
+
+- the chosen node still had positive apportionment deficit → **placed by mass** (`slots_by_mass`);
+- the chosen node's deficit was already zero, so `_pick_node` fell through to whichever node
+  still had a span left → **placed by exhaustion** (`slots_by_fallthrough`).
+
+`slots_by_mass + slots_by_fallthrough == slots_filled` is asserted in
+`exam/coverage.py::build_report`, not merely commented. A slot filled through some third path
+would be a real bug and should crash rather than report a plausible number.
+
+**On single-span-per-node corpora, fidelity runs well below 1.0 while coverage and fill can
+both read 1.000.** Lecture-slide sections hold far less than `MAX_CHUNK_TOKENS = 512`, so each
+leaf section yields exactly one chunk — the real ingest course map is 32 nodes, 32 spans, max 1
+span per node. Combined with the hard invariant that no span is used by more than one item in
+the entire paper, **each node can host at most one question.** When Hare apportionment says a
+high-mass node deserves three slots, two are unsatisfiable and fall through to the next node
+with any span left. This is the primary use case and the demo path, not an edge case. Measured
+on the real course map:
+
+| Blueprint | `coverage_ratio` | `fill_ratio` | `allocation_fidelity` | by mass | by fallthrough |
+|---|---|---|---|---|---|
+| `quiz_default` | 0.219 | 1.000 | 0.714 | 5 | 2 |
+| `midterm_default` | 0.688 | 1.000 | 0.682 | 15 | 7 |
+| `final_default` | **1.000** | **1.000** | **0.625** | 20 | 12 |
+
+`final_default` is the case that motivated the metric: both headline numbers read perfect while
+38% of the allocation mechanism did not operate. This is a **spec-level tension, not a bug in
+`allocate.py`** — nothing in the solver is wrong, and adding the metric did not change its
+behaviour (`solve()` returns byte-identical `ItemSpec[]`). It makes the degradation visible.
+
+All three ratios must be displayed together by the P4 renderer, the P5 UI and the P6 eval
+harness. Showing only the first two reproduces exactly the blindness this field exists to
+remove.
 
 ### `SectionSpec` / `Blueprint` invariants (validated at parse time)
 
@@ -195,3 +232,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-27 | this commit | PPTX table cell text extracted (merge-aware); table text counts toward `token_count` | A `has_table` node carried no table content to ground a question in; both PPTX fixtures held empty tables, so the gap survived review | P1 follow-up |
 | 2026-08-27 | this commit | `df_other` key-term-salience narrowing confirmed as intended | Human decision — the code was right and the plan's prose was the imprecise half | P1 follow-up |
 | 2026-08-27 | this commit | `TestParseTimeout` threshold 0.2s → 1.0s | Real parse is 50–96 ms, so ~2× headroom; under suite load the healthy file timed out too and the gate failed intermittently | P1 follow-up |
+| 2026-08-28 | uncommitted | `CoverageReport` gains `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity`; `build_report` asserts `by_mass + by_fallthrough == slots_filled` | `final_default` reported `coverage_ratio 1.000` and `fill_ratio 1.000` while 38% of its slots were placed by span exhaustion, not by mass. Measurement only — allocation behaviour unchanged, `solve()` byte-identical | P2 instrumentation |

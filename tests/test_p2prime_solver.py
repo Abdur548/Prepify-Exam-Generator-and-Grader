@@ -572,3 +572,389 @@ class TestSpecHash:
         assert items4[0].span_ids == items5[0].span_ids
         assert items4[0].bloom == items5[0].bloom
         assert items4[0].spec_hash != items5[0].spec_hash
+
+
+# ---------------------------------------------------------------------------
+# allocation_fidelity — how much of the paper mass actually placed
+#
+# coverage_ratio and fill_ratio can BOTH read 1.000 on a paper where a third of
+# the slots were placed by span exhaustion rather than by apportionment. These
+# gates prove the third ratio sees what the first two cannot.
+# ---------------------------------------------------------------------------
+
+def _roomy_course_map() -> list[CourseMapNode]:
+    """Every node carries far more spans than apportionment can ask for, so no
+    slot can ever fall through. Equal mass keeps the Hare split exact."""
+    return [
+        CourseMapNode(
+            node_id=f"roomy_{i:02d}",
+            path=["Ch 1", f"1.{i}"],
+            source_file="deck.pdf",
+            page_span=(i + 1, i + 2),
+            token_count=100 + i,
+            chunk_ids=[f"roomy_{i:02d}_c{j}" for j in range(10)],
+            key_terms=[],
+            flags=NodeFlags(),
+            instructional_mass=0.2,
+        )
+        for i in range(5)
+    ]
+
+
+def _one_span_per_node_course_map() -> list[CourseMapNode]:
+    """The real-corpus shape: every node yields exactly one chunk.
+
+    Two heavy nodes carry most of the mass, so Hare hands each of them 3 slots —
+    but each holds a single span, and span-uniqueness caps a node at one item.
+    The surplus can only be placed by falling through to nodes the mass never
+    asked for. Total spans exactly equal total slots, so the paper still fills
+    completely and touches every node: coverage_ratio and fill_ratio both read
+    1.000 over a paper half of which was placed by exhaustion.
+    """
+    nodes = [
+        CourseMapNode(
+            node_id=f"hi_{i:02d}",
+            path=["Ch 1", f"1.{i}"],
+            source_file="deck.pdf",
+            page_span=(i + 1, i + 2),
+            token_count=900 + i,
+            chunk_ids=[f"hi_{i:02d}_c0"],
+            key_terms=[],
+            flags=NodeFlags(),
+            instructional_mass=40.0,
+        )
+        for i in range(2)
+    ]
+    nodes += [
+        CourseMapNode(
+            node_id=f"lo_{i:02d}",
+            path=["Ch 2", f"2.{i}"],
+            source_file="deck.pdf",
+            page_span=(20 + i, 21 + i),
+            token_count=100 + i,
+            chunk_ids=[f"lo_{i:02d}_c0"],
+            key_terms=[],
+            flags=NodeFlags(),
+            instructional_mass=5.0,
+        )
+        for i in range(6)
+    ]
+    return nodes
+
+
+def _eight_slot_blueprint(blueprint_id: str) -> Blueprint:
+    return Blueprint(
+        blueprint_id=blueprint_id,
+        title="Fidelity Probe",
+        total_marks=16,               # 8 * 2
+        duration_minutes=30,
+        sections=[
+            SectionSpec(
+                section_id="A",
+                title="Multiple Choice",
+                item_type="mcq",
+                count=8,
+                marks_each=2,
+                bloom=["remember", "understand"],
+                options_count=4,
+            )
+        ],
+    )
+
+
+def _ten_slot_blueprint() -> Blueprint:
+    return Blueprint(
+        blueprint_id="roomy",
+        title="Roomy",
+        total_marks=20,               # 10 * 2
+        duration_minutes=30,
+        sections=[
+            SectionSpec(
+                section_id="A",
+                title="Multiple Choice",
+                item_type="mcq",
+                count=10,
+                marks_each=2,
+                bloom=["remember", "understand"],
+                options_count=4,
+            )
+        ],
+    )
+
+
+class TestSlotAccountingInvariant:
+    """
+    The invariant is only worth having if something proves it fires. It is raised
+    explicitly rather than asserted, because `python -O` strips `assert` — which
+    would silently disable the one check standing between a broken count and a
+    believable-looking coverage table.
+    """
+
+    def test_broken_accounting_raises(self) -> None:
+        from coursegen.exam.coverage import build_report
+
+        with pytest.raises(ValueError, match="Slot accounting broken"):
+            build_report(
+                blueprint_id="x",
+                course_map=[],
+                node_slot_map={},
+                node_marks_map={},
+                unfilled_slots=[],
+                warnings=[],
+                slots_total=10,
+                slots_by_mass=3,          # 3 + 3 != 10
+                slots_by_fallthrough=3,
+            )
+
+    def test_consistent_accounting_does_not_raise(self) -> None:
+        from coursegen.exam.coverage import build_report
+
+        report = build_report(
+            blueprint_id="x",
+            course_map=[],
+            node_slot_map={},
+            node_marks_map={},
+            unfilled_slots=[],
+            warnings=[],
+            slots_total=10,
+            slots_by_mass=7,
+            slots_by_fallthrough=3,
+        )
+        assert report.slots_filled == 10
+        assert report.allocation_fidelity == pytest.approx(0.7)
+
+
+class TestAllocationFidelity:
+    def test_satisfiable_apportionment_reports_full_fidelity(self) -> None:
+        """Plenty of spans everywhere → every slot placed because mass said so."""
+        items, report = solve(_roomy_course_map(), _ten_slot_blueprint())
+
+        assert len(items) == 10
+        assert report.slots_filled == 10
+        assert report.slots_by_fallthrough == 0
+        assert report.slots_by_mass == 10
+        assert report.allocation_fidelity == 1.0
+
+    def test_scarce_spans_force_fallthrough(self) -> None:
+        """High-mass nodes with one span each → apportionment cannot be satisfied.
+
+        This is the defect the metric exists to expose: both headline numbers
+        read perfect while half the paper was placed by exhaustion.
+        """
+        items, report = solve(
+            _one_span_per_node_course_map(), _eight_slot_blueprint("scarce")
+        )
+
+        assert len(items) == 8
+        assert report.slots_by_fallthrough > 0
+        assert report.allocation_fidelity < 1.0
+        assert report.slots_by_mass + report.slots_by_fallthrough == report.slots_filled
+        assert report.allocation_fidelity == pytest.approx(
+            report.slots_by_mass / report.slots_filled
+        )
+        # The blindness: neither existing ratio registers the degradation.
+        assert report.coverage_ratio == 1.0
+        assert report.fill_ratio == 1.0
+        assert report.unfilled_slots == []
+
+    def test_fidelity_is_zero_safe_when_nothing_is_filled(
+        self, course_map: list[CourseMapNode]
+    ) -> None:
+        """slots_filled == 0 must yield 0.0, not a ZeroDivisionError."""
+        blueprint = Blueprint(
+            blueprint_id="nothing_fills",
+            title="Nothing Fills",
+            total_marks=6,            # 3 * 2
+            duration_minutes=15,
+            sections=[
+                SectionSpec(
+                    section_id="A",
+                    title="Code MCQ",
+                    item_type="mcq",
+                    count=3,
+                    marks_each=2,
+                    bloom=["remember"],
+                    options_count=4,
+                    requires_flags_any=["has_code"],   # no fixture node has it
+                )
+            ],
+        )
+        items, report = solve(course_map, blueprint)
+
+        assert items == []
+        assert report.slots_filled == 0
+        assert report.slots_by_mass == 0
+        assert report.slots_by_fallthrough == 0
+        assert report.allocation_fidelity == 0.0
+
+    @pytest.mark.parametrize(
+        "blueprint_name", ["quiz_default", "midterm_default", "final_default"]
+    )
+    def test_invariant_holds_across_shipped_blueprints(
+        self, course_map: list[CourseMapNode], blueprint_name: str
+    ) -> None:
+        """slots_by_mass + slots_by_fallthrough == slots_filled == len(items).
+
+        A slot filled through a path neither branch counts would be a real bug.
+        """
+        raw = json.loads(
+            (
+                Path(__file__).parent.parent
+                / "coursegen/exam/blueprints" / f"{blueprint_name}.json"
+            ).read_text(encoding="utf-8")
+        )
+        items, report = solve(course_map, Blueprint.model_validate(raw))
+
+        assert report.slots_by_mass + report.slots_by_fallthrough == report.slots_filled
+        assert report.slots_filled == len(items)
+        assert 0.0 <= report.allocation_fidelity <= 1.0
+        assert report.slots_by_mass >= 0
+        assert report.slots_by_fallthrough >= 0
+
+
+# ---------------------------------------------------------------------------
+# Regression: adding allocation_fidelity is MEASUREMENT ONLY
+#
+# The expected ItemSpec[] is re-derived here in the test from the course map,
+# the blueprint and _hare_apportionment — deliberately without consulting the
+# new counters. If counting had moved a single item, this oracle diverges.
+# ---------------------------------------------------------------------------
+
+def _expected_items(
+    nodes: list[CourseMapNode], section: SectionSpec
+) -> list[tuple[str, str, list[str], str]]:
+    """Independent re-derivation of one unconstrained section's ItemSpec[].
+
+    Returns (slot_id, node_id, span_ids, spec_hash) in emission order.
+    Mirrors §9.3: renormalise mass → Hare quota → fill by descending deficit
+    (fall through to the lowest node_id with spans left) → ascending-token_count
+    difficulty ladder → cycle bloom.
+    """
+    candidates = sorted(nodes, key=lambda n: n.node_id)
+    total_mass = sum(n.instructional_mass for n in candidates)
+    masses = {n.node_id: n.instructional_mass / total_mass for n in candidates}
+    deficit = dict(_hare_apportionment(masses, section.count))
+    available = {n.node_id: list(n.chunk_ids) for n in candidates}
+    by_id = {n.node_id: n for n in candidates}
+
+    picked: list[tuple[str, str]] = []
+    for _ in range(section.count):
+        primary = sorted(
+            [nid for nid in deficit if deficit[nid] > 0 and available[nid]],
+            key=lambda nid: (-deficit[nid], nid),
+        )
+        if primary:
+            nid = primary[0]
+            deficit[nid] -= 1
+        else:
+            fallback = sorted(n.node_id for n in candidates if available[n.node_id])
+            if not fallback:
+                break
+            nid = fallback[0]
+        picked.append((nid, available[nid].pop(0)))
+
+    picked.sort(key=lambda p: (by_id[p[0]].token_count, p[0]))
+
+    return [
+        (
+            f"{section.section_id}-{idx + 1:02d}",
+            nid,
+            [span],
+            _spec_hash(
+                nid,
+                [span],
+                section.item_type,
+                section.bloom[idx % len(section.bloom)],
+                section.marks_each,
+                section.options_count,
+            ),
+        )
+        for idx, (nid, span) in enumerate(picked)
+    ]
+
+
+class TestMeasurementOnly:
+    @pytest.mark.parametrize(
+        "nodes_fn, blueprint_fn",
+        [
+            (_roomy_course_map, _ten_slot_blueprint),
+            (_one_span_per_node_course_map, lambda: _eight_slot_blueprint("scarce")),
+        ],
+    )
+    def test_items_match_independently_derived_allocation(
+        self, nodes_fn, blueprint_fn
+    ) -> None:
+        """Both branches of the fill loop, checked against an oracle written here.
+
+        The roomy map exercises the mass branch only; the one-span map exercises
+        both. Neither expectation is a stored golden file — each is computed in
+        the test from the same inputs the solver receives.
+        """
+        nodes = nodes_fn()
+        blueprint = blueprint_fn()
+        items, _ = solve(nodes, blueprint)
+
+        expected = _expected_items(nodes, blueprint.sections[0])
+        actual = [(i.slot_id, i.node_id, i.span_ids, i.spec_hash) for i in items]
+        assert actual == expected
+
+    @pytest.mark.parametrize(
+        "blueprint_name", ["quiz_default", "midterm_default", "final_default"]
+    )
+    def test_shipped_blueprint_hashes_recompute_from_item_fields(
+        self, course_map: list[CourseMapNode], blueprint_name: str
+    ) -> None:
+        """Every spec_hash still derives from exactly its documented inputs.
+
+        The shipped blueprints are multi-section and flag-filtered, so the oracle
+        above does not apply — but each emitted item must still hash to
+        _spec_hash(its own fields). A counter that perturbed node, span, bloom or
+        marks selection would break this.
+        """
+        raw = json.loads(
+            (
+                Path(__file__).parent.parent
+                / "coursegen/exam/blueprints" / f"{blueprint_name}.json"
+            ).read_text(encoding="utf-8")
+        )
+        blueprint = Blueprint.model_validate(raw)
+        items, _ = solve(course_map, blueprint)
+        options_by_section = {
+            s.section_id: s.options_count for s in blueprint.sections
+        }
+        item_type_by_section = {s.section_id: s.item_type for s in blueprint.sections}
+
+        assert items, f"{blueprint_name} produced no items"
+        for item in items:
+            section_id = item.slot_id.split("-")[0]
+            assert item.spec_hash == _spec_hash(
+                item.node_id,
+                item.span_ids,
+                item_type_by_section[section_id],
+                item.bloom,
+                item.marks,
+                options_by_section[section_id],
+            )
+
+    @pytest.mark.parametrize(
+        "blueprint_name", ["quiz_default", "midterm_default", "final_default"]
+    )
+    def test_item_stream_is_stable_across_solves(
+        self, course_map: list[CourseMapNode], blueprint_name: str
+    ) -> None:
+        """Slot ids, node ids, span ids and spec hashes, re-solved and compared."""
+        raw = json.loads(
+            (
+                Path(__file__).parent.parent
+                / "coursegen/exam/blueprints" / f"{blueprint_name}.json"
+            ).read_text(encoding="utf-8")
+        )
+        blueprint = Blueprint.model_validate(raw)
+
+        def stream(bp: Blueprint) -> list[tuple[str, str, tuple[str, ...], str]]:
+            return [
+                (i.slot_id, i.node_id, tuple(i.span_ids), i.spec_hash)
+                for i in solve(course_map, bp)[0]
+            ]
+
+        assert stream(blueprint) == stream(blueprint)

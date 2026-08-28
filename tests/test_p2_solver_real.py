@@ -16,6 +16,7 @@ Gate conditions (must all hold):
   2. No span appears in two items anywhere in the paper
   3. CoverageReport is populated and internally consistent
   4. Per-node coverage table is non-trivial (inspect output with pytest -s)
+  5. allocation_fidelity is reported, in range, and accounts for every filled slot
 """
 from __future__ import annotations
 
@@ -187,3 +188,72 @@ class TestCoverageReportRealData:
             "No node received any marks — solver produced zero items on real data"
         )
         assert report.mass_covered > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Gate 5 — allocation_fidelity on real data
+#
+# On this corpus every node yields exactly one chunk, so apportionment is
+# frequently unsatisfiable and a real share of the paper is placed by falling
+# through to whatever node still has a span. coverage_ratio and fill_ratio
+# cannot see that. These gates only prove the third ratio is REPORTED and
+# COHERENT — the value itself moves with the corpus and is not asserted.
+# ---------------------------------------------------------------------------
+
+BLUEPRINTS = ["quiz_default", "midterm_default", "final_default"]
+
+
+class TestAllocationFidelityRealData:
+    @pytest.mark.parametrize("blueprint_name", BLUEPRINTS)
+    def test_fidelity_reported_and_in_range(
+        self, real_course_map: list, blueprint_name: str
+    ) -> None:
+        _, report = solve(real_course_map, _load_blueprint(blueprint_name))
+        assert 0.0 <= report.allocation_fidelity <= 1.0
+
+    @pytest.mark.parametrize("blueprint_name", BLUEPRINTS)
+    def test_slot_accounting_invariant(
+        self, real_course_map: list, blueprint_name: str
+    ) -> None:
+        """Every filled slot came through exactly one of the two fill branches."""
+        items, report = solve(real_course_map, _load_blueprint(blueprint_name))
+        assert report.slots_by_mass + report.slots_by_fallthrough == report.slots_filled
+        assert report.slots_filled == len(items)
+        assert report.slots_by_mass >= 0
+        assert report.slots_by_fallthrough >= 0
+        assert report.allocation_fidelity == pytest.approx(
+            report.slots_by_mass / report.slots_filled if report.slots_filled else 0.0
+        )
+
+    def test_three_ratios_printed_side_by_side(self, real_course_map: list) -> None:
+        """Three questions, three answers, printed together. Run with pytest -s.
+
+        No fidelity value is asserted — the corpus can legitimately change and a
+        pinned number would make an honest re-ingest look like a regression.
+        """
+        lines = [
+            "",
+            "Real data - three ratios that answer three different questions",
+            f"  {'blueprint':<18}{'coverage':>10}{'fill':>8}{'fidelity':>10}"
+            f"{'by_mass':>9}{'by_fall':>9}{'slots':>8}",
+            "  " + "-" * 72,
+        ]
+        for name in BLUEPRINTS:
+            _, r = solve(real_course_map, _load_blueprint(name))
+            lines.append(
+                f"  {name:<18}{r.coverage_ratio:>10.3f}{r.fill_ratio:>8.3f}"
+                f"{r.allocation_fidelity:>10.3f}{r.slots_by_mass:>9}"
+                f"{r.slots_by_fallthrough:>9}{r.slots_filled:>5}/{r.slots_total:<2}"
+            )
+        spans_per_node = [len(n.chunk_ids) for n in real_course_map]
+        lines.append(
+            f"\n  nodes={len(real_course_map)}  spans={sum(spans_per_node)}  "
+            f"max spans/node={max(spans_per_node)}"
+        )
+        summary = "\n".join(lines) + "\n"
+        print(summary)
+
+        # One row per blueprint, all three ratios present on each.
+        for name in BLUEPRINTS:
+            assert name in summary
+        assert "fidelity" in summary

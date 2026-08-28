@@ -149,6 +149,9 @@ class TestCoverageReport:
             slots_total=25,
             slots_filled=25,
             fill_ratio=1.0,
+            slots_by_mass=25,
+            slots_by_fallthrough=0,
+            allocation_fidelity=1.0,
             mass_covered=0.87,
             per_node=[
                 NodeCoverage(
@@ -174,6 +177,9 @@ class TestCoverageReport:
             slots_total=5,
             slots_filled=3,
             fill_ratio=0.6,
+            slots_by_mass=2,
+            slots_by_fallthrough=1,
+            allocation_fidelity=2 / 3,
             mass_covered=0.55,
             per_node=[],
             unfilled_slots=["A-04", "A-05"],
@@ -181,6 +187,8 @@ class TestCoverageReport:
         )
         assert len(report.unfilled_slots) == 2
         assert len(report.warnings) == 1
+        assert report.slots_by_fallthrough == 1
+        assert report.slots_by_mass + report.slots_by_fallthrough == report.slots_filled
 
 
 

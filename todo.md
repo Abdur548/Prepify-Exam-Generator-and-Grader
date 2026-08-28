@@ -242,6 +242,50 @@ document's top-N key terms contributes 0. It measures **salience**, not presence
       section C's 4 slots (1.5× headroom), `fill_ratio = 1.0`, nothing unfilled. A course deck
       with two figures and no typed mathematics would starve section C on **material**, not on
       scheduling.
+- [ ] **P6: the eval harness must report `allocation_fidelity` for the solver arm alongside
+      coverage.** The whole evaluation is solver vs `baseline_naive` on coverage. If a large
+      share of the solver's paper is placed by span exhaustion rather than by mass — on the real
+      course map that is 29% / 32% / 38% for quiz / midterm / final — then reporting coverage
+      alone **credits the mass-allocation thesis for work that span-exhaustion is doing**. The
+      solver's claim is that code decides *what* to ask, by `instructional_mass`; an eval that
+      cannot separate mass-placed slots from exhaustion-placed ones cannot support that claim.
+      Report `allocation_fidelity` per blueprint, per arm.
+
+---
+
+## P2 review — `allocation_fidelity` instrumentation  [COMPLETE — shipped 2026-08-28]
+
+- [x] **Invariant raised, not asserted.** The slot-accounting check was a bare `assert`, which
+      `python -O` strips — silently disabling the one guard between a broken count and a
+      believable-looking coverage table. Converted to an explicit `raise ValueError` and
+      covered by `TestSlotAccountingInvariant`, which proves it *fires* rather than only that
+      it holds on good input. **General rule for this codebase: any check whose failure would
+      produce a plausible-but-wrong artifact must raise, not assert.** R5's caps
+      (2 retries, 1 regeneration pass, 20 calls per exam) are in that category — check them
+      when P3 lands.
+
+Full write-up with pasted gate output in `progress.md`; the three-ratio contract is documented
+in `pipeline.md`.
+
+- [x] **`CoverageReport` gains `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity`.**
+      On real ingest output every node has exactly one span (32 nodes, 32 spans, max 1), because
+      a lecture-slide section holds far less than `MAX_CHUNK_TOKENS = 512`. With the
+      span-uniqueness invariant that caps each node at **one question**, so when Hare
+      apportionment awards a node three slots, two are unsatisfiable and fall through to
+      whatever node still has a span. `final_default` was reporting `coverage_ratio 1.000` and
+      `fill_ratio 1.000` while 38% of the allocation mechanism did not operate — both headline
+      numbers perfect over a paper more than a third of which was placed by exhaustion.
+      Measured fidelity: `quiz_default` 0.714, `midterm_default` 0.682, `final_default` 0.625.
+      Counted at the two branches that already existed in `_solve_section`, never by parsing
+      the warning strings. `build_report()` asserts
+      `slots_by_mass + slots_by_fallthrough == slots_filled` in code, not in a comment.
+      **Measurement only — allocation behaviour is unchanged**, proved by diffing `solve()`
+      output against the pre-change solver loaded from `d73a610` into the same process: byte
+      identical on the fixture map, on the real ingest map, and on two synthetic shapes.
+      This is a **spec-level tension, not a bug in `allocate.py`.** Nothing in the solver is
+      wrong. Fidelity below 1.0 on lecture-slide corpora is structural and stays that way until
+      either a node can yield more than one span or span-uniqueness is relaxed — both spec
+      changes, neither attempted here.
 
 ---
 
@@ -327,6 +371,14 @@ rather than the other way round. Still needs the human's explicit call.
       the P7 rehearsal would be too late.
 - [ ] Renderer and coverage view must display `fill_ratio` alongside `coverage_ratio` and must
       surface `unfilled_slots` — `coverage_ratio` alone can read 1.00 on an incomplete paper.
+- [ ] **The rendered coverage table must show `allocation_fidelity` next to `coverage_ratio`
+      and `fill_ratio`** — all three, together. They answer three different questions and they
+      disagree on the real course map: `final_default` reads `coverage_ratio 1.000`,
+      `fill_ratio 1.000`, `allocation_fidelity 0.625`. **A table showing only the first two
+      would repeat exactly the blindness the instrumentation pass exists to remove** — a paper
+      presented as fully covered and fully filled, with 12 of its 32 questions placed by span
+      exhaustion rather than by `instructional_mass`. Show `slots_by_fallthrough` too; the
+      count is what makes the ratio actionable.
 - [ ] Server must run single-worker (`--workers 1`) — `QdrantClient(path=...)` takes an
       exclusive file lock (security requirement S8, see `README.md`)
 

@@ -15,6 +15,8 @@ def build_report(
     unfilled_slots: list[str],
     warnings: list[str],
     slots_total: int,
+    slots_by_mass: int,
+    slots_by_fallthrough: int,
 ) -> CoverageReport:
     covered_ids = set(node_slot_map.keys())
     nodes_total = len(course_map)
@@ -28,6 +30,26 @@ def build_report(
     # four questions. fill_ratio is what proves the paper is actually complete.
     slots_filled = slots_total - len(unfilled_slots)
     fill_ratio = slots_filled / slots_total if slots_total > 0 else 0.0
+
+    # Every filled slot was placed through exactly one of the solver's two branches:
+    # the node still had apportionment deficit (mass), or it did not (fallthrough).
+    # A mismatch means a slot was filled by a third path neither branch counted —
+    # that is a real bug, and it should crash rather than report a plausible number.
+    #
+    # Raised explicitly rather than asserted: `python -O` strips `assert`, which would
+    # turn the one check standing between a broken count and a believable-looking
+    # coverage table into a no-op. A silent failure here produces exactly the
+    # plausible-wrong report this metric exists to prevent.
+    if slots_by_mass + slots_by_fallthrough != slots_filled:
+        raise ValueError(
+            f"Slot accounting broken: slots_by_mass={slots_by_mass} + "
+            f"slots_by_fallthrough={slots_by_fallthrough} != slots_filled={slots_filled}"
+        )
+
+    # fill_ratio proves the paper is complete; it says nothing about HOW it was
+    # filled. allocation_fidelity is the share placed because mass asked for it,
+    # rather than because the mass-preferred nodes had no spans left.
+    allocation_fidelity = slots_by_mass / slots_filled if slots_filled > 0 else 0.0
 
     per_node = [
         NodeCoverage(
@@ -48,6 +70,9 @@ def build_report(
         slots_total=slots_total,
         slots_filled=slots_filled,
         fill_ratio=fill_ratio,
+        slots_by_mass=slots_by_mass,
+        slots_by_fallthrough=slots_by_fallthrough,
+        allocation_fidelity=allocation_fidelity,
         mass_covered=mass_covered,
         per_node=per_node,
         unfilled_slots=unfilled_slots,
