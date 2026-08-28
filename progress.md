@@ -47,7 +47,7 @@
 $ python -m pytest -v
 ============================= test session starts =============================
 platform win32 -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0
-rootdir: C:\Users\Abdur Rahman\Documents\Qoder\2026-08-27\6073d82b
+rootdir: <local workspace path redacted>
 configfile: pyproject.toml
 testpaths: tests
 plugins: anyio-4.12.0, mock-3.15.1
@@ -127,7 +127,7 @@ Budget remaining : 59922 tokens
 $ python -m pytest tests/test_p2prime_solver.py -v
 ============================= test session starts =============================
 platform win32 -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0
-rootdir: C:\Users\Abdur Rahman\Documents\Qoder\2026-08-27\6073d82b
+rootdir: <local workspace path redacted>
 configfile: pyproject.toml
 testpaths: tests
 plugins: anyio-4.12.0, mock-3.15.1
