@@ -150,7 +150,14 @@ BATCH_SIZE: int = 6                  # item specs per LLM call
 GROUNDEDNESS_TAU: float = 0.45
 DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
 OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length
+# Base seed for MCQ option shuffling. It is combined with the item's slot_id per
+# item — seeding a fresh Random with this constant alone gives EVERY question the
+# same permutation, so an LLM's habit of emitting the correct answer first puts the
+# answer in the same position on every question in the paper.
 MCQ_SHUFFLE_SEED: int = 42
+# Option labels assigned by position after shuffling, so the rendered order and the
+# answer key cannot disagree regardless of how the renderer prints them.
+MCQ_OPTION_LABELS: str = "ABCDEFGH"
 MAX_REGENERATION_PASSES: int = 1     # R5: cap enforced in code, not just comment
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@
 | P1 | Ingest | PASS | `pytest` + `python -m coursegen --dry-run`; gate = ingest twice → identical point count, node IDs, `course_map.json` hash | 2026-08-27 (re-verified after corrective pass) |
 | P2 | Solver on real data | PASS | `pytest tests/test_p2_solver_real.py -v` | 2026-08-28 |
 | P2 | `allocation_fidelity` instrumentation | PASS | `python -m pytest` + `python -m coursegen --dry-run` | 2026-08-28 |
-| P3 | Generation + validation | NOT STARTED | | |
+| P3 | Generation + validation | PASS | `pytest tests/test_p3_generation_validation.py -v` | 2026-08-28 |
 | P4 | Render + chat | NOT STARTED | | |
 | P5 | UI + resilience | NOT STARTED | | |
 | P6 | Evaluation + baseline | NOT STARTED | | |
@@ -991,3 +991,123 @@ $ python -m pytest
 158 passed in 9.72s
 ```
 **Result:** PASS
+
+
+---
+
+## P3 — Generation + validation
+
+**Built:**
+- `llm/prompts.py` — stable system prompt and `build_generation_messages()`; source spans are wrapped in `<source_span id="...">...</source_span>` and labelled as data, never instructions.
+- `exam/validate.py` — four zero-LLM gates: schema, groundedness, duplication, MCQ hygiene; deterministic MCQ option shuffle with `MCQ_SHUFFLE_SEED`.
+- `exam/generate.py` — 6-spec batching, `spec_hash` cache, one regeneration pass, `run_manifest.json`.
+- `tests/test_p3_generation_validation.py` — TDD tests written first; watched RED before implementation.
+
+**Files touched:**
+`coursegen/llm/prompts.py`, `coursegen/exam/generate.py`, `coursegen/exam/validate.py`,
+`tests/test_p3_generation_validation.py`, `pipeline.md`, `progress.md`
+
+**Deviations from spec:**
+- `GROUNDEDNESS_TAU` remains uncalibrated (already documented in `config.py` and `todo.md`). P3 code accepts an injected scorer for tests; real cross-encoder wiring/calibration remains a follow-up before live quality claims.
+- MCQ hygiene implements the deterministic checks available without a model call: all/none-of-above rejection, option length band, duplicate normalized options, and fixed-seed shuffle. The "exactly one option high-similarity to the answer span" check is not separately implemented yet.
+
+**TDD RED command:**
+```
+$ python -m pytest tests/test_p3_generation_validation.py -q
+FFFFFFFFFF                                                               [100%]
+... failures: P3 prompts API missing; P3 generation module missing; P3 validation module missing
+```
+**Result:** expected RED — P3 modules/APIs were absent.
+
+**Gate command:**
+```
+$ python -m pytest tests/test_p3_generation_validation.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: E:\Qoder\prepify
+configfile: pyproject.toml
+plugins: anyio-4.12.0, mock-3.15.1
+collected 10 items
+
+tests	est_p3_generation_validation.py ..........                        [100%]
+
+============================= 10 passed in 0.35s ==============================
+```
+**Result:** PASS
+
+**Full suite after P3:**
+```
+168 passed in 10.91s
+```
+**Result:** PASS (P0/P1/P2 tests unaffected)
+
+**Post-phase verification:**
+- [x] Batched generation: 7 specs → 2 calls with `BATCH_SIZE = 6`.
+- [x] `spec_hash` cache hit costs zero LLM calls.
+- [x] `run_manifest.json` written with course-map hash, model ID, seed, spec hashes, call/token counts, cache hits, validation counts, regeneration passes, flagged slots, wall-clock.
+- [x] One regeneration pass only — failing slot called exactly twice (initial + one retry) and then shipped flagged.
+- [x] Schema gate deliberately trips invalid `GeneratedItem`.
+- [x] Groundedness gate deliberately trips low score.
+- [x] Duplication gate deliberately trips cosine duplicate.
+- [x] MCQ hygiene gate rejects all/none-of-the-above and shuffles options with fixed seed.
+
+**Known issues carried forward:**
+- Groundedness threshold must be calibrated against real cross-encoder logits before live quality claims.
+- MCQ "exactly one option high-similarity to the answer span" remains to be implemented/calibrated.
+
+### Reviewer corrections applied before P3 was committed (2026-08-28)
+
+Four defects found in review. All fixed in the same commit that ships P3; 158 → 172 tests.
+
+**1. A skipped gate was indistinguishable from a passed gate.**
+`groundedness_scorer` and `embedding_fn` default to `None`, and when absent the gate was
+silently not executed. `_issue_counts` seeded every gate at zero and incremented only on
+failure, so the manifest wrote `"groundedness": 0` whether the gate cleared every item or never
+ran. The obvious call — no scorers — produced a manifest that read like a clean sweep of four
+gates when only two had executed. `validate_generated_items` now returns a per-gate record of
+`{evaluated, passed, failed, skipped}`, which is also what R6 actually asks for ("per-gate
+pass/fail counts", not failure counts).
+
+**2. `blueprint_id` was missing from the manifest (R6/R7).**
+R7 requires that a `run_manifest.json` be sufficient to regenerate the same `ItemSpec[]`.
+`ItemSpec[]` is a function of the course map *and* the blueprint, so a manifest carrying only
+`course_map_hash` cannot distinguish a midterm run from a final one — R7 failed by omission.
+`blueprint_id` is now a required parameter of `generate_exam`.
+
+**3. Every MCQ received the identical option permutation.**
+`_shuffle_options` seeded a fresh `Random` with the bare `MCQ_SHUFFLE_SEED` for each item, so
+all items got the same permutation. Reproduced before the fix — slots A-01, A-02 and A-03 all
+returned `['w2','w1','w3','correct']`. Models skew toward emitting the correct answer first, so
+a fixed permutation lands the answer in the same position on every question: a paper answerable
+without reading it. The seed now mixes in `slot_id`, which keeps the shuffle reproducible per
+item while varying it across them.
+
+**4. Option labels were not reassigned and `correct_option` was not remapped.**
+Shuffling the list while leaving each label attached to its own text produced options ordered
+`['C','B','D','A']` with `correct_option` still `"A"`. A P4 renderer printing them in list order
+with fresh positional labels would show the answer as "D" while the key said "A" — a wrong
+answer key on every shuffled MCQ. Options are now relabelled by position and `correct_option`
+remapped to follow, so the item is self-consistent regardless of how P4 renders it.
+
+**Test changes:** `test_mcq_hygiene_shuffles_options_with_fixed_seed` asserted
+`labels != ["A","B","C","D"]` — it encoded defect 4 as expected behaviour. Replaced with
+assertions of the correct properties (order and key are stable per item; labels are positional;
+the key points at the originally-correct text) plus two new tests covering defects 3 and 4
+directly. No assertion was weakened. The remaining edits were mechanical: seven call sites
+unpacking a two-tuple, four passing the new `blueprint_id`.
+
+**Gate command:**
+```
+$ python -m pytest
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+............................                                             [100%]
+172 passed in 9.46s
+```
+**Result:** PASS
+
+**Open decision for the human:** should `generate_exam` *require* the scorer and embedder in
+production rather than allowing them to be `None`? Skipping is now recorded rather than silent,
+which fixes the reported defect, but §9.5 defines validation as four gates — arguably a
+production run should not be able to skip two of them at all. Left as a design call rather than
+decided unilaterally.

@@ -350,15 +350,60 @@ rather than the other way round. Still needs the human's explicit call.
 
 ---
 
-## P3 — Generation + validation
+## P3 — Generation + validation  [COMPLETE — gate PASS 2026-08-28]
 
 - [ ] **Calibrate `GROUNDEDNESS_TAU` against measured cross-encoder logits.** The current value
       0.45 was chosen as though it were a 0–1 similarity, but
       `cross-encoder/ms-marco-MiniLM-L-6-v2` emits unbounded raw logits (roughly −11 to +11).
       Until it is set from measurement it does not mean anything. Do not guess a new number.
-- [ ] Confirm or replace the invented `eligibility` definition before `generate.py` consumes it
-      — currently the intersection of `requires_flags_any` and the node's flags, so always `[]`
-      for unconstrained sections (see `progress.md`, P2′ deviations)
+- [x] Confirm or replace the invented `eligibility` definition before `generate.py` consumes it
+      — P3 does not consume `eligibility`; generation passes the full `ItemSpec` through the prompt
+      as solver output, and validation uses only `slot_id`, `item_type`, `span_ids`, and `spec_hash`.
+- [x] `llm/prompts.py` — stable generation prompt; source spans delimited and labelled as data,
+      never instructions.
+- [x] `exam/generate.py` — 6-spec batching, `spec_hash` cache, one regeneration pass,
+      `run_manifest.json`.
+- [x] `exam/validate.py` — schema, groundedness, duplication, MCQ hygiene gates.
+- [x] Mocked end-to-end generation tests — `tests/test_p3_generation_validation.py`.
+- [ ] Implement/calibrate MCQ "exactly one option high-similarity to the answer span" hygiene
+      check. Current P3 hygiene covers all/none-of-above, length band, duplicate normalized
+      options, and fixed-seed shuffle.
+
+---
+
+## P3 review — reviewer corrections  [COMPLETE — shipped with P3, 2026-08-28]
+
+Four defects found reviewing P3 before it was committed. Full write-up in `progress.md`.
+
+- [x] **Skipped gate was indistinguishable from a passed gate.** With `groundedness_scorer` or
+      `embedding_fn` absent the gate silently did not run, and the manifest recorded zero
+      failures either way. Now a per-gate `{evaluated, passed, failed, skipped}` record — which
+      is what R6 asks for.
+- [x] **`blueprint_id` added to the manifest.** R7 needs the manifest to be sufficient to
+      regenerate the same `ItemSpec[]`; that is a function of the course map *and* the
+      blueprint, so `course_map_hash` alone cannot tell a midterm run from a final one.
+- [x] **MCQ shuffle seed now varies per item.** One seed for every item gave the whole paper the
+      same permutation; models emit the correct answer first, so the answer landed in the same
+      position on every question.
+- [x] **Options relabelled by position and `correct_option` remapped.** Shuffling while leaving
+      labels attached to their text produced `C,B,D,A` with the key still on "A" — a wrong
+      answer key on every shuffled MCQ once P4 renders by position.
+
+### Open decision for the human
+
+- [ ] **Should `generate_exam` require the scorer and embedder in production?** Skipping is now
+      *recorded* rather than silent, which fixes the reported defect. But §9.5 defines
+      validation as four gates, and a production run arguably should not be able to skip two of
+      them at all. The counter-argument is test ergonomics — injection is what keeps the default
+      suite network-free. Left as a design call rather than decided unilaterally.
+
+### Carried into P4
+
+- [ ] **The renderer must use the option labels as authoritative**, not re-derive them from list
+      position. They now agree, so either works — but only because the shuffle relabels. If that
+      ever changes, position-based labelling silently corrupts the answer key.
+- [ ] **`allocation_fidelity` must appear in the rendered coverage table** alongside
+      `coverage_ratio` and `fill_ratio` (carried from the P2 review).
 
 ---
 

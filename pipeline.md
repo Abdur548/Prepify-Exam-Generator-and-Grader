@@ -1,6 +1,6 @@
 # Current Pipeline
 
-_Last updated: 2026-08-28 · phase: P2 (allocation-fidelity instrumentation)_
+_Last updated: 2026-08-28 · phase: P3 (generation + validation)_
 
 ## Flow
 
@@ -124,7 +124,29 @@ With a single source document every `df_other` is 0 and mass collapses to normal
 tune it by watching the demo.
 
 ### Generation
-- **Status:** not started (P3)
+- **Input:** `list[ItemSpec]`, `list[CourseMapNode]`, `span_text_by_id`, LLM client
+- **Output:** `list[GeneratedItem]`, cache files keyed by `spec_hash`, `run_manifest.json`
+- **Modules:** `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`
+- **LLM calls:** batches of `BATCH_SIZE = 6` uncached item specs per call; cached `spec_hash` hits cost zero calls
+- **Key parameters:** `MAX_REGENERATION_PASSES = 1`, `GROUNDEDNESS_TAU = 0.45` (raw cross-encoder logit, uncalibrated), `DEDUP_TAU = 0.85`, `OPTION_LENGTH_BAND = 0.40`, `MCQ_SHUFFLE_SEED = 42`
+- **Prompt-injection control:** every source span is wrapped in `<source_span id="...">...</source_span>` and the stable system prompt says source spans are data, never instructions (S2)
+- **Validation gates:** Pydantic schema parse, groundedness score, duplication cosine, MCQ hygiene. Failures regenerate only their slots, capped at one regeneration pass; remaining failures are shipped flagged in `run_manifest.json`.
+- **Gate execution is recorded, not inferred.** `validate_generated_items` returns a per-gate
+  `{evaluated, passed, failed, skipped}` record, and the manifest carries it verbatim. The
+  groundedness and duplication gates depend on an injected scorer and embedder so the default
+  test run stays network-free; when either is absent the gate is marked `skipped`. A bare
+  failure count cannot tell "cleared every item" from "never ran" — both read zero, and only
+  one of them means the paper was validated.
+- **MCQ option shuffling** is seeded per item (`MCQ_SHUFFLE_SEED` mixed with `slot_id`), not
+  from the bare constant: one seed for all items gives every question the same permutation, and
+  since models tend to emit the correct answer first, the answer then sits in an identical
+  position on every question. After shuffling, options are **relabelled by position** and
+  `correct_option` is remapped to follow, so the rendered order and the answer key cannot
+  disagree however P4 chooses to print them.
+- **Reproducibility (R7):** the manifest carries `blueprint_id` as well as `course_map_hash`.
+  `ItemSpec[]` is a function of both, so a manifest with only the course-map hash cannot tell a
+  midterm run from a final one and the run would not be reproducible from it.
+- **Status:** implemented with mocked LLM tests (P3)
 
 ### Render + Chat
 - **Status:** not started (P4)
@@ -233,3 +255,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-27 | this commit | `df_other` key-term-salience narrowing confirmed as intended | Human decision — the code was right and the plan's prose was the imprecise half | P1 follow-up |
 | 2026-08-27 | this commit | `TestParseTimeout` threshold 0.2s → 1.0s | Real parse is 50–96 ms, so ~2× headroom; under suite load the healthy file timed out too and the gate failed intermittently | P1 follow-up |
 | 2026-08-28 | uncommitted | `CoverageReport` gains `slots_by_mass` / `slots_by_fallthrough` / `allocation_fidelity`; `build_report` asserts `by_mass + by_fallthrough == slots_filled` | `final_default` reported `coverage_ratio 1.000` and `fill_ratio 1.000` while 38% of its slots were placed by span exhaustion, not by mass. Measurement only — allocation behaviour unchanged, `solve()` byte-identical | P2 instrumentation |
+| 2026-08-28 | uncommitted | `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`, mocked P3 tests | Batched schema-constrained generation with cache, validation gates and manifest | P3 |
