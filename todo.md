@@ -635,9 +635,9 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
       mix falls into `_hare_apportionment`'s zero-mass branch and splits evenly — it fails
       quietly rather than loudly, which is the wrong direction for this codebase. Decide whether
       to require sum-to-1.0, reject non-positive values, or accept the current behaviour.
-- [ ] **`group_id` reaches the LLM prompt** via `spec.model_dump()`, so prompt text can vary
-      while `spec_hash` does not. Harmless today — the question asked is the same — but **stage 3
-      owns prompt construction and should decide whether to exclude it.**
+- [x] **`group_id` reaches the LLM prompt** via `spec.model_dump()`, so prompt text can vary
+      while `spec_hash` does not. **RESOLVED in stage 3** — excluded via
+      `spec.model_dump(exclude=_PROMPT_EXCLUDED_SPEC_FIELDS)`. Human decision 2026-08-29.
 - [ ] **`cognitive_balance` has no parse-time validation**, not even sum-to-1.0. A declared
       target summing to 1.3 is arguably malformed on its face.
 - [ ] **Short-fill trade-off:** with a grouped Bloom order, a section filling 5 of 10 slots at
@@ -646,6 +646,93 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] **`format_requirement` is validated on `SectionSpec` only**, not on `ItemSpec`. Fine while
       the blueprint is the only entry point; a later stage constructing specs from another source
       would not be covered.
+
+---
+
+## Spec Amendment 01 — stage 3 (grounding + generation instructions)  [SHIPPED 2026-08-30]
+
+- [x] `grounding: Literal["span", "synthesis"] = "span"` on `SectionSpec` / `ItemSpec`. `"span"`
+      is current behaviour and the default. `"synthesis"` means the model invents the artifact
+      and the span is context, not the thing being reproduced.
+- [x] `grounding` **joins `spec_hash`, appended only when it is not the default** — encoding
+      `"span"` would have added a trailing separator, changed every hash in the product and
+      silently invalidated the on-disk generation cache for all three shipped blueprints. Same
+      trap `format_requirement` avoided in stage 2; checked as mutation M1, and caught by the
+      stage-2 test.
+- [x] Gate 2 records a synthesis item as **`not_applicable`** — a new per-gate int beside the
+      existing `skipped` bool. It does not fail the item and does not silently pass it.
+      **"We could not check" and "there is nothing to check against" are different facts** and
+      collapsing them would hide the more important one.
+- [x] `generation_instructions` on `SectionSpec` / `ItemSpec`, into the **user** message only.
+      Joins `spec_hash`, appended only when set.
+- [x] `run_manifest.json` carries `grounding: {synthesis_items, items_total, synthesis_ratio}`
+      on every run, plus `warnings` past `SYNTHESIS_ITEM_WARN_RATIO = 0.25` (a starting value,
+      commented as such, not a measured one).
+- [x] `group_id` excluded from the LLM prompt — the stage-2 open item above.
+- [x] 36 new tests; 350 pass; 8/8 mutations caught, each asserting the mutation applied;
+      shipped blueprints byte-identical on every pre-existing field, `spec_hash` included,
+      verified in a separate process with `os.path.normcase` tree identity.
+
+### Owed by a LATER stage — recorded here so it is not lost
+
+- [ ] **The rendered paper must MARK synthesis items for the student.** `exam/render.py` was out
+      of scope for stage 3, so the count is currently visible only in `run_manifest.json` — which
+      a student never reads. A synthesis item is a question **not backed by their own uploaded
+      material**: they cannot revise a novel game tree from their own slides (§7). Marking it on
+      the paper (and in the answer key) is what turns a buried number into an honest one. Decide
+      the marking: a per-item badge, a section note, or a line in the coverage table.
+- [ ] **S2 — `generation_instructions` is a prompt-injection surface the moment users can author
+      blueprints.** It is author-supplied text that reaches the model **as instructions**, not as
+      delimited data — the one thing `SYSTEM_PROMPT` tells the model that source spans are not.
+      Safe today because blueprints are authored by the project and shipped in the repo. Before
+      any user-supplied blueprint path exists it needs the same treatment source spans already
+      get: delimited, labelled as data, and the system prompt told not to obey it. Recorded in
+      the `SectionSpec.generation_instructions` docstring as well as here.
+
+### Open, recorded not resolved
+
+- [ ] **`not_applicable` was added to gate 2 only.** The brief states the invariant "for any
+      gate", but the work item is explicitly about gate 2. Gate 4 (MCQ hygiene) has the same
+      shape — a `short` item reaches it and is neither evaluated nor counted — so
+      `evaluated + not_applicable == items that reached it` is literally true for gate 2 and not
+      for gate 4. Widening it was not authorised, so it was not invented. **Decide whether gate 4
+      should count non-MCQ items as not-applicable.**
+- [ ] **`not_applicable` is counted even when the gate is `skipped`.** Applicability is a
+      property of the item, not of what the caller injected, so a run with no scorer AND
+      synthesis items reports both facts. The cost: on a skipped gate `evaluated` is 0 by
+      construction, so the invariant above is short of what reached the gate. The alternative
+      (check the scorer first) makes the invariant unconditional but re-collapses the
+      distinction in exactly the case this stage exists to prevent. Confirm the call.
+- [ ] **`spec_hash`'s optional fields are positional and untagged.** `format_requirement`,
+      `grounding` and `generation_instructions` are each appended only when present, so a
+      `generation_instructions` whose entire text is the word `"synthesis"` hashes identically to
+      a synthesis section carrying no instructions. Contrived, and tagging the fields would
+      change every existing hash — which is the one thing that function must not do.
+- [ ] **`slot_id` and `eligibility` reach the prompt while staying out of `spec_hash`** — the
+      same class of defect `group_id` was just fixed for. `slot_id` is load-bearing (the model
+      must label each output), so it cannot simply be dropped; `eligibility` probably can.
+      `_PROMPT_EXCLUDED_SPEC_FIELDS` in `llm/prompts.py` is where the decision goes.
+- [ ] **`spec_hash` (64 hex chars) and `node_id` are still sent to the model** and it can use
+      neither. Dropping them was explicitly out of scope for stage 3 — reported, not acted on.
+      Together they are roughly 90 characters per spec, ~135 tokens per full 6-spec batch.
+- [ ] **`generation_instructions` is unbounded free text, repeated once per spec in a batch.**
+      Measured: a 220-char instruction costs +56 estimated tokens at 1 spec and +335 at
+      `BATCH_SIZE = 6` (6.0x); at the 20-call cap that is ~6,700 of a 60,000-token budget.
+      Bounded today, but linear in instruction length — a ~2,000-char instruction alone would
+      approach the whole per-exam cap. **Decide whether to cap its length** (no limit was
+      specified, so none was invented) **or hoist it out of the per-spec payload.**
+- [ ] **`_estimate_tokens` under-counts what is actually sent — pre-existing, not from this
+      stage.** It sums `len(m["content"])` only, so it misses (a) the JSON envelope, ~965
+      estimated vs ~1059 wire tokens on a full batch, and (b) the `response_format` JSON schema,
+      **~347 tokens on every generation call**. Together roughly a 35–45% under-count. It is
+      corrected after the fact by `record_call` from the provider's real `usage.total_tokens`,
+      but `check_call` — the actual budget gate — decides on the under-count, so
+      `PER_EXAM_TOKEN_CAP` can be overrun by a call it approved.
+- [ ] **`--dry-run` does not exercise `build_generation_messages`.** It prints a hand-written
+      sample that is not `SYSTEM_PROMPT`, so the gate command verifies the budget path but proves
+      nothing about the real prompt. L10 byte-identity is covered by tests instead.
+- [ ] **`SYNTHESIS_ITEM_WARN_RATIO = 0.25` is uncalibrated.** A starting value, picked so one
+      trace question in a section of four does not cry wolf. Measure it against real papers.
 
 ---
 

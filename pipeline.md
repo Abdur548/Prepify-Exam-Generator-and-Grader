@@ -1,6 +1,6 @@
 # Current Pipeline
 
-_Last updated: 2026-08-28 · phase: P4 (render + chat partial)_
+_Last updated: 2026-08-30 · phase: P5 partial · Spec Amendment 01 stage 3 shipped_
 
 ## Flow
 
@@ -39,15 +39,19 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
 - **Difficulty ladder:** ascending `token_count` within a section. This is a **documented
   heuristic, not a pedagogical guarantee** — a longer section is not reliably a harder one.
 - **Cache key:** `ItemSpec.spec_hash` = sha256 over `node_id`, `span_ids`, `item_type`, `bloom`,
-  `marks`, `options_count`, and `format_requirement` **when set**. `marks` and `options_count`
+  `marks`, `options_count`, then `format_requirement`, `grounding` and `generation_instructions`
+  **when set**. `marks` and `options_count`
   are in the key because the generation cache only pays off *across* papers, which is exactly
   where a 4-mark midterm question and a 5-mark final question drawn from the same node and span
-  would otherwise collide. `format_requirement` joins it because it changes the prompt.
-  It is **appended only when present**, rather than encoded as `""` the way `options_count` is:
-  encoding `None` as an empty field would add a trailing separator and change every hash in the
+  would otherwise collide. The last three join it because each changes the prompt — `grounding`
+  most fundamentally of all, since it decides whether the item is drawn from the span at all.
+  Each is **appended only when present** (`grounding` only when it is not the default `"span"`),
+  rather than encoded as `""` the way `options_count` is:
+  encoding a default as an empty field would add a trailing separator and change every hash in the
   product, silently invalidating the on-disk generation cache for all three shipped blueprints.
   `group_id` is deliberately **excluded** — it is presentational, so regrouping items under a
-  question number must not invalidate a cached generation of the same question.
+  question number must not invalidate a cached generation of the same question. Because it is
+  outside the key it is also excluded from the prompt (see Generation).
 - **Authored-blueprint structure (Amendment 01 stage 2):**
   - `format_requirement` — the finer generation-facing format (`TRUE_FALSE_SERIES`,
     `ALGORITHMIC_TRACE_PROBLEM`, …), kept separate from `item_type` because `item_type` decides
@@ -69,6 +73,10 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
     It cannot be a parse-time validator because the realised mix is an allocation outcome.
     This is the only signal that would catch a paper drifting to easy recall questions while the
     blueprint asked for 70% apply/analyse — every other metric would call that paper fine.
+- **Authored-blueprint generation control (Amendment 01 stage 3):** the solver also carries
+  `grounding` and `generation_instructions` from `SectionSpec` to every `ItemSpec` it emits, and
+  both join `spec_hash` on the rules above. Neither changes how a slot is *allocated* — they
+  change what the model is asked once the slot is filled. See **Generation** for what they do.
 - **Status:** implemented (on fixture; real data in P2)
 
 ### Ingest
@@ -210,11 +218,43 @@ tune it by watching the demo.
 - **Prompt-injection control:** every source span is wrapped in `<source_span id="...">...</source_span>` and the stable system prompt says source spans are data, never instructions (S2)
 - **Validation gates:** Pydantic schema parse, groundedness score, duplication cosine, MCQ hygiene. Failures regenerate only their slots, capped at one regeneration pass; remaining failures are shipped flagged in `run_manifest.json`.
 - **Gate execution is recorded, not inferred.** `validate_generated_items` returns a per-gate
-  `{evaluated, passed, failed, skipped}` record, and the manifest carries it verbatim. The
-  groundedness and duplication gates depend on an injected scorer and embedder so the default
-  test run stays network-free; when either is absent the gate is marked `skipped`. A bare
-  failure count cannot tell "cleared every item" from "never ran" — both read zero, and only
+  `{evaluated, passed, failed, skipped, not_applicable}` record, and the manifest carries it
+  verbatim. The groundedness and duplication gates depend on an injected scorer and embedder so
+  the default test run stays network-free; when either is absent the gate is marked `skipped`. A
+  bare failure count cannot tell "cleared every item" from "never ran" — both read zero, and only
   one of them means the paper was validated.
+- **`skipped` and `not_applicable` are different facts, deliberately kept apart.** `skipped` is a
+  bool about the GATE — no scorer was injected, so it never ran. `not_applicable` is an int about
+  ITEMS — how many the gate legitimately does not apply to. For a gate that ran,
+  `evaluated + not_applicable == items that reached it`. "We could not check" and "there is
+  nothing to check against" are not the same thing, and collapsing them would hide the second,
+  which is the more important one.
+- **Grounding mode (`ItemSpec.grounding`, Amendment 01 §6.4).** `"span"` is the default and the
+  existing product: the item is written FROM its span and gate 2 scores the answer against it.
+  `"synthesis"` means the model INVENTS the artifact — a novel game tree, a novel word problem —
+  with the span as context. Gate 2 records a synthesis item as `not_applicable`: it must not fail
+  it (the blueprint asked for exactly this) and must not pass it either (nothing was checked).
+  The check sits **before** the scorer-injection branch, because whether an item is groundable is
+  a property of the item, not of what the caller happened to inject.
+- **The paper says how many of its questions are ungrounded.** `run_manifest.json` carries
+  `grounding: {synthesis_items, items_total, synthesis_ratio}` on **every** run, at whatever
+  value, plus a `warnings` list that fires past `SYNTHESIS_ITEM_WARN_RATIO = 0.25` (a starting
+  value, not a measured one). A synthesis item is a question not backed by the student's own
+  material — a student cannot revise a novel game tree from their own slides — so the count is
+  made visible exactly as `fill_ratio` and `allocation_fidelity` made earlier degradations
+  visible. Counted over the SPECS, not the surviving items: "how much of this paper was invented"
+  is a property of what the blueprint asked for, not of what passed validation. **The renderer
+  does not yet mark synthesis items for the student (todo.md).**
+- **`generation_instructions` goes in the USER message, never the system prompt.** L10 requires
+  `SYSTEM_PROMPT` stay byte-identical across calls so provider-side prompt caching applies;
+  templating per-section text into it would defeat that on every single call. It rides in the
+  per-spec payload because it is per-SECTION and one batch can mix sections. **S2:** this is
+  author-supplied text arriving in the prompt as *instructions* rather than as delimited data —
+  safe only while blueprints are authored by the project (todo.md).
+- **`group_id` is excluded from the prompt** (`_PROMPT_EXCLUDED_SPEC_FIELDS` in `llm/prompts.py`).
+  It is presentational, and it is deliberately excluded from `spec_hash`, so leaving it in let the
+  prompt text vary while the cache key did not — one cache entry serving two different prompts.
+  Any future field excluded from `spec_hash` belongs in that set for the same reason.
 - **MCQ option shuffling** is seeded per item (`MCQ_SHUFFLE_SEED` mixed with `slot_id`), not
   from the bare constant: one seed for all items gives every question the same permutation, and
   since models tend to emit the correct answer first, the answer then sits in an identical
@@ -360,6 +400,31 @@ deck before it means anything (todo.md).
 - `bloom` must be non-empty — the solver cycles it with `bloom_list[idx % len(bloom_list)]`.
 - `sum(count * marks_each) == total_marks` — otherwise a hand-authored blueprint can print
   "Total: 100 marks" over a 95-mark paper.
+- `grounding` is a `Literal["span", "synthesis"]`, defaulting to `"span"`, on both `SectionSpec`
+  and `ItemSpec`. A `Literal` rather than a config set (unlike `KNOWN_FORMAT_REQUIREMENTS`):
+  these are not a growing vocabulary but a branch `validate.py` switches on, so a third mode
+  needs code, not data. An unrecognised value must not parse into a paper that looks honoured.
+
+### What joins `spec_hash`, and what must not
+
+`spec_hash = sha256(node_id | span_ids | item_type | bloom | marks | options_count`
+`[| format_requirement] [| grounding] [| generation_instructions])`.
+
+The three bracketed fields are appended **only when set** — `grounding` only when it is not the
+default `"span"` — never encoded as `""` the way `options_count` is. Encoding a default would
+append a trailing separator, change every hash in the product, and silently invalidate the
+on-disk generation cache for all three shipped blueprints. They join the key because each
+changes the prompt, and `grounding` most of all: it decides whether the item is drawn from the
+span at all.
+
+`slot_id`, `eligibility` and `group_id` are **not** in the key. `group_id` is therefore also
+excluded from the prompt (above); `slot_id` and `eligibility` still reach it, which is a
+pre-existing prompt-varies-while-key-does-not seam recorded in todo.md.
+
+Ordering note: because each optional field is appended positionally and only when present, a
+free-text `generation_instructions` equal to `"synthesis"` would hash like a synthesis section.
+Recorded rather than defended against — a positional-tag encoding would change every existing
+hash, which is the one thing this function must not do.
 
 ### `GeneratedItem` invariants (validated at parse time)
 
@@ -403,3 +468,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-28 | uncommitted | `TextBlock.is_slide_heading` → `is_explicit_heading` | A second format now uses the flag; the name said "slide" while DOCX paragraph styles set it too | Ingest fix |
 | 2026-08-28 | uncommitted | `chunk.page` = page of the first block contributing to that chunk, not `section.page_start` | A chunk drawn from page 7 of a 5–9 section was cited as page 5. **Changes chunk IDs / Qdrant point IDs — a prior index is stale and must be re-ingested** | Ingest fix |
 | 2026-08-29 | uncommitted | `SectionSpec.topic` (optional), topic→node matching in `exam/allocate.py`, topic filter beside the flag filter, `TopicCoverage` + `CoverageReport.per_topic`, `TOPIC_MATCH_MIN_TOKEN_LEN` / `TOPIC_MATCH_MIN_SCORE` | Spec Amendment 01 option C, signed 2026-08-28: an authored blueprint sets across-topic weights by hand while the solver still allocates within topic from the student's own material, and says so loudly when the material does not cover a topic. `topic is None` **is** the derived path — `solve()` byte-identical on all three shipped blueprints, all 213 prior tests unmodified | Amendment 01 stage 1 |
+| 2026-08-30 | uncommitted | `SectionSpec`/`ItemSpec` gain `grounding` (`span`\|`synthesis`) and `generation_instructions`; both join `spec_hash` **only when non-default**; gate 2 records synthesis items as `not_applicable` rather than passing or failing them; `run_manifest.json` gains `grounding.{synthesis_items, items_total, synthesis_ratio}` + `warnings` past `SYNTHESIS_ITEM_WARN_RATIO = 0.25`; `group_id` removed from the LLM prompt | Amendment 01 §6.4/§6.6. Some exam items legitimately require synthesis (a novel game tree), and gate 2 cannot score what has no source span — but an ungrounded question is not studiable from the upload, so the COUNT has to be visible rather than inferable. `group_id` was excluded from `spec_hash` yet reaching the prompt, so prompt text could vary while the cache key did not. `solve()` byte-identical on all three shipped blueprints, all 314 prior tests unmodified | Amendment 01 stage 3 |

@@ -248,6 +248,28 @@ KNOWN_FORMAT_REQUIREMENTS: frozenset[str] = frozenset({
 COGNITIVE_BALANCE_TOLERANCE: float = 0.10
 
 # ---------------------------------------------------------------------------
+# Grounding mode (Spec Amendment 01, stage 3)
+# ---------------------------------------------------------------------------
+# UNIT: fraction of the EMITTED items in one paper that carry
+# grounding="synthesis", in [0, 1]. Above this, generation WARNS.
+#
+# Why this is worth a number at all: a synthesis item is a question NOT backed
+# by the student's own material. For an algorithmic trace that is pedagogically
+# correct — an exam should not reuse the game tree from the slides — and
+# everywhere else it is an unwelcome surprise, because a student cannot revise a
+# novel game tree from their own upload (§7). The count and the ratio therefore
+# go in the run_manifest whatever their value, exactly as `fill_ratio` and
+# `allocation_fidelity` made earlier invisible degradations visible; this
+# constant only decides when the manifest also SAYS something about it.
+#
+# A STARTING VALUE, not a measured one. Nothing has been calibrated against real
+# papers. 0.25 was picked so that one trace question in a five-question section
+# does not cry wolf, while a paper that is mostly invented content does. It is a
+# WARNING and never a raise: a blueprint may legitimately be trace-heavy, and
+# that is information rather than an error.
+SYNTHESIS_ITEM_WARN_RATIO: float = 0.25
+
+# ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
 CHAT_MAX_TURNS: int = 6              # L6: older turns dropped, never summarised

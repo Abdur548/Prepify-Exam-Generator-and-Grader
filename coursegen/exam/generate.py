@@ -96,6 +96,8 @@ def generate_exam(
     call_count_after = getattr(llm_client.budget, "calls_used", 0)
     token_count_after = getattr(llm_client.budget, "tokens_used", 0)
 
+    grounding_summary, grounding_warnings = _grounding_summary(specs)
+
     manifest = {
         "course_map_hash": _course_map_hash(course_map),
         "blueprint_id": blueprint_id,
@@ -105,11 +107,22 @@ def generate_exam(
         "call_count": call_count_after - call_count_before,
         "token_count": token_count_after - token_count_before,
         "cache_hits": cache_hits,
-        # Per-gate {evaluated, passed, failed, skipped} rather than a bare failure
-        # count: zero failures because a gate cleared everything and zero failures
-        # because it never ran are different facts, and only one of them means the
-        # paper was validated.
+        # Per-gate {evaluated, passed, failed, skipped, not_applicable} rather
+        # than a bare failure count: zero failures because a gate cleared
+        # everything, zero because it never ran, and zero because it did not
+        # apply are three different facts, and only one of them means the paper
+        # was validated.
         "validation": gates,
+        # How many of this paper's questions are NOT backed by the student's own
+        # material (§6.4, §7). Reported on every run, at whatever value —
+        # exactly as fill_ratio and allocation_fidelity report degradations that
+        # were previously invisible. A student cannot revise a novel game tree
+        # from their own slides, so this number has to be visible rather than
+        # inferable.
+        "grounding": grounding_summary,
+        # Warnings ABOUT THE PAPER, distinct from per-item validation issues:
+        # nothing here failed a gate. Currently only the synthesis-ratio warning.
+        "warnings": grounding_warnings,
         "regeneration_passes": regeneration_passes,
         "flagged_slots": flagged_slots,
         "wall_clock_seconds": round(time.perf_counter() - start, 6),
@@ -181,6 +194,44 @@ def _spec_for_slot(specs: list[ItemSpec], slot_id: str) -> ItemSpec:
     raise KeyError(slot_id)
 
 
+def _grounding_summary(
+    specs: list[ItemSpec],
+) -> tuple[dict[str, Any], list[str]]:
+    """How much of this paper is not backed by the student's own material.
+
+    Counted over the SPECS, not over the accepted items: the question "how much
+    of this paper was invented" is a property of what the blueprint asked for,
+    and counting only the items that survived validation would let the number
+    move for reasons that have nothing to do with grounding.
+
+    Returns the manifest block and any warnings. A WARNING and never a raise —
+    a trace-heavy blueprint is a legitimate authoring choice (§4), and an exam
+    that is largely synthesis is information rather than an error. The threshold
+    lives in config.SYNTHESIS_ITEM_WARN_RATIO and is a starting value, not a
+    measured one.
+    """
+    total = len(specs)
+    synthesis = sum(1 for s in specs if s.grounding == "synthesis")
+    ratio = synthesis / total if total > 0 else 0.0
+
+    summary: dict[str, Any] = {
+        "synthesis_items": synthesis,
+        "items_total": total,
+        "synthesis_ratio": ratio,
+    }
+
+    warnings: list[str] = []
+    if ratio > config.SYNTHESIS_ITEM_WARN_RATIO:
+        warnings.append(
+            f"{synthesis} of {total} items ({ratio:.0%}) are synthesis items, "
+            f"above SYNTHESIS_ITEM_WARN_RATIO="
+            f"{config.SYNTHESIS_ITEM_WARN_RATIO:.0%}. These questions are NOT "
+            f"drawn from the uploaded material — a student cannot revise them "
+            f"from their own slides."
+        )
+    return summary, warnings
+
+
 def _course_map_hash(course_map: list[CourseMapNode]) -> str:
     payload = json.dumps([n.model_dump() for n in course_map], sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -193,8 +244,11 @@ def _merge_gate_reports(
     """
     Combine the initial pass and the regeneration pass into one record.
 
-    Counts add; `skipped` is AND-ed, because a gate only counts as skipped for the
-    run as a whole if it ran in neither pass.
+    Counts add — `not_applicable` included, because an item re-offered to a gate
+    that still does not apply to it was legitimately not checked twice, exactly
+    as `evaluated` counts two evaluations of the same slot. `skipped` is AND-ed,
+    because a gate only counts as skipped for the run as a whole if it ran in
+    neither pass.
     """
     merged: dict[str, dict[str, Any]] = {}
     for gate in first:
@@ -204,5 +258,6 @@ def _merge_gate_reports(
             "passed": a["passed"] + b.get("passed", 0),
             "failed": a["failed"] + b.get("failed", 0),
             "skipped": bool(a["skipped"] and b.get("skipped", True)),
+            "not_applicable": a["not_applicable"] + b.get("not_applicable", 0),
         }
     return merged

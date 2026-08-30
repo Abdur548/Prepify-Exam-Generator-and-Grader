@@ -32,9 +32,35 @@ def new_gate_report() -> dict[str, dict[str, Any]]:
     validated paper and an unvalidated one, and R6 asks for pass/fail counts, not
     just failures. `skipped` records the dependency-injection case explicitly:
     with no scorer or no embedder, gates 2 and 3 do not execute at all.
+
+    `not_applicable` is a SEPARATE fact and deliberately not folded into
+    `skipped`. "We could not check this" and "there is nothing here to check
+    against" are different, and the second is the more important one: a
+    synthesis item (§6.4) has no source span to be grounded in, so gate 2 must
+    neither fail it nor silently pass it. Collapsing the two would hide exactly
+    the count this stage exists to make visible.
+
+    `skipped` stays a BOOL about the gate (did it run at all) and
+    `not_applicable` is an INT about items (how many this gate legitimately does
+    not apply to), so for every gate that ran:
+
+        evaluated + not_applicable == items that reached it
+
+    Applicability is a property of the ITEM, not of what the caller injected, so
+    `not_applicable` is counted even when `skipped` is True — a run with no
+    scorer AND synthesis items reports both facts rather than letting the louder
+    one swallow the other. `evaluated` is then 0 by construction, which is the
+    one case where the sum above is short of what reached the gate; `skipped`
+    is what says why.
     """
     return {
-        gate: {"evaluated": 0, "passed": 0, "failed": 0, "skipped": False}
+        gate: {
+            "evaluated": 0,
+            "passed": 0,
+            "failed": 0,
+            "skipped": False,
+            "not_applicable": 0,
+        }
         for gate in ("schema", "groundedness", "duplication", "mcq_hygiene")
     }
 
@@ -66,6 +92,16 @@ def validate_generated_items(
         gates[gate]["evaluated"] += 1
         gates[gate]["passed" if ok else "failed"] += 1
 
+    def record_not_applicable(gate: str) -> None:
+        """The gate reached this item and legitimately does not apply to it.
+
+        Counted apart from `evaluated` so that
+        `evaluated + not_applicable == items that reached the gate` holds, and
+        apart from `passed` so the item is never reported as having cleared a
+        check that never ran on it.
+        """
+        gates[gate]["not_applicable"] += 1
+
     # Gate 1: schema.
     for raw in raw_items:
         slot_id = str(raw.get("slot_id", "<missing>"))
@@ -92,7 +128,21 @@ def validate_generated_items(
         source = "\n".join(span_text_by_id[sid] for sid in spec.span_ids)
 
         # Gate 2: groundedness.
-        if groundedness_scorer is not None:
+        #
+        # A synthesis item (§6.4) is written to INVENT its artifact — a novel
+        # game tree, a novel word problem — with the span as context rather than
+        # as the thing being reproduced. There is nothing for groundedness to
+        # score the answer against, so the gate records the item as
+        # not-applicable and lets it through. It must not fail the item (the
+        # blueprint asked for exactly this) and must not pass it either (nothing
+        # was checked) — the count reaches the run_manifest instead.
+        #
+        # Checked BEFORE the scorer-injection branch so the fact is recorded
+        # whether or not a scorer was supplied: whether an item is groundable is
+        # a property of the item, not of what the caller happened to inject.
+        if spec.grounding == "synthesis":
+            record_not_applicable("groundedness")
+        elif groundedness_scorer is not None:
             score = groundedness_scorer(item.model_answer, source)
             if score < config.GROUNDEDNESS_TAU:
                 record("groundedness", False)

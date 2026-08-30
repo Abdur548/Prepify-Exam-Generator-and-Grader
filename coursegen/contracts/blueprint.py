@@ -50,6 +50,42 @@ class SectionSpec(BaseModel):
     # levels apportions nothing, and reaches _hare_apportionment as a
     # ZeroDivisionError at solve time.
     bloom_mix: Optional[dict[str, float]] = Field(default=None, min_length=1)
+    # How this section's items relate to their source span (§6.4).
+    #
+    #   "span"      — current behaviour and the default. The item is WRITTEN FROM
+    #                 its span, and validation gate 2 (groundedness) scores the
+    #                 model answer against that span.
+    #   "synthesis" — the model INVENTS the artifact (a novel adversarial game
+    #                 tree, a novel word problem). The span is context, not the
+    #                 thing being reproduced, so gate 2 has nothing to score
+    #                 against and records the item as NOT APPLICABLE — never as
+    #                 a pass, and never as a failure.
+    #
+    # This is not a loophole for ungrounded questions: §7 records that a
+    # synthesis item is not studiable from the upload, so the count reaches the
+    # run_manifest and warns past config.SYNTHESIS_ITEM_WARN_RATIO.
+    #
+    # A Literal rather than a config set, unlike KNOWN_FORMAT_REQUIREMENTS:
+    # these two values are not a growing vocabulary, they are a branch that code
+    # in validate.py switches on. A third value would need code, not data.
+    grounding: Literal["span", "synthesis"] = "span"
+    # Per-section free text handed to the item writer, e.g. "Generate a novel
+    # adversarial game tree with terminal leaf values; require the student to
+    # show pruned branches." (§6.6)
+    #
+    # Goes in the USER message, NEVER the system prompt: L10 requires the system
+    # prompt stay byte-identical across calls so provider-side prompt caching
+    # applies, and templating variable content into it would defeat that on
+    # every single call.
+    #
+    # S2 — this is author-supplied text arriving in the prompt AS INSTRUCTIONS
+    # rather than as delimited data, which is the one thing SYSTEM_PROMPT tells
+    # the model that source spans are not. That is safe only while blueprints
+    # are authored by the project. The moment users can supply their own
+    # blueprints this becomes a live prompt-injection surface and the text needs
+    # the same delimiting-and-distrusting treatment source spans already get.
+    # See todo.md.
+    generation_instructions: Optional[str] = None
 
     @model_validator(mode="after")
     def _format_requirement_is_known(self) -> "SectionSpec":

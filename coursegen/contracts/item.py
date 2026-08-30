@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, model_validator
 
@@ -32,19 +32,44 @@ class ItemSpec(BaseModel):
     # renderer will later group items carrying the same group_id under one
     # question number; nothing renders it yet.
     group_id: Optional[str] = None
+    # Carried through from SectionSpec (§6.4). "span" — written FROM the span,
+    # gate 2 scores the answer against it. "synthesis" — the model invents the
+    # artifact and the span is context, so gate 2 records the item as NOT
+    # APPLICABLE rather than passing or failing it.
+    #
+    # Defaulted to "span" so every ItemSpec the three shipped blueprints produce
+    # is unchanged, and so an ItemSpec constructed without the field cannot
+    # accidentally become ungrounded.
+    grounding: Literal["span", "synthesis"] = "span"
+    # Carried through from SectionSpec (§6.6). Reaches the model in the USER
+    # message only — never the system prompt (L10). See the SectionSpec field
+    # for the S2 injection note.
+    generation_instructions: Optional[str] = None
     # sha256(node_id + span_ids + item_type + bloom + marks + options_count
-    #        [+ format_requirement, appended only when it is set]) — cache key.
+    #        [+ format_requirement, + grounding, + generation_instructions —
+    #         each appended only when it is set / non-default]) — cache key.
     # marks and options_count are in the hash because the cache is shared across papers:
     # a 4-mark short question (midterm) and a 5-mark short question (final) can be drawn
     # from the same node+span+bloom, and must not collide.
     #
     # format_requirement JOINS the hash because it changes the prompt: two items
     # differing only in format are different questions and must not share a
-    # cached generation.
+    # cached generation. grounding and generation_instructions join it for the
+    # same reason, and more strongly — grounding changes whether the item is
+    # drawn from the span at all.
+    #
+    # Each is appended ONLY when set (grounding: only when it is not the default
+    # "span"), never encoded as "" the way options_count is. Encoding the
+    # default would add a trailing separator to every hash in the product and
+    # silently invalidate the on-disk generation cache for all three shipped
+    # blueprints — the trap format_requirement already avoided.
     #
     # group_id is deliberately NOT in the hash. It is PRESENTATIONAL — it changes
     # how items are DISPLAYED, not what is asked — so regrouping sub-questions
-    # must not invalidate cached generations.
+    # must not invalidate cached generations. For the same reason it is excluded
+    # from the PROMPT (llm/prompts.py): a field outside the cache key must not
+    # be able to vary the prompt, or a cached generation gets reused across a
+    # prompt difference.
     spec_hash: str
 
 

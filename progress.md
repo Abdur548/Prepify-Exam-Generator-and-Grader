@@ -1778,3 +1778,136 @@ $ python -m coursegen --dry-run
   emits only the first level. The `cognitive_balance` warning is what surfaces it.
 - The tolerance boundary is not assertable — 0.10 is not representable in binary float, so no
   fixture can distinguish `>` from `>=`.
+
+---
+
+## Spec Amendment 01 — stage 3 (grounding + generation instructions)
+
+**Date:** 2026-08-30 · **Scope:** contracts, allocation, prompt, validation, manifest. Mocked
+LLM client only — zero network calls. 314 → 350 tests.
+
+**Built:**
+- `grounding: Literal["span", "synthesis"] = "span"` on `SectionSpec` and `ItemSpec`. `"span"`
+  is current behaviour; `"synthesis"` says the model INVENTS the artifact (a novel game tree, a
+  novel word problem) with the span as context rather than as the thing being reproduced.
+- `generation_instructions: Optional[str]` on both — per-section free text, carried into the
+  **user** message and never the system prompt (L10).
+- Both **join `spec_hash`, appended only when non-default**, so two items that will be prompted
+  differently cannot share a cache entry while the three shipped blueprints keep every hash.
+- Gate 2 records a synthesis item as **`not_applicable`**, a new per-gate integer beside the
+  existing `skipped` bool. It does not fail the item (the blueprint asked for exactly this) and
+  does not pass it (nothing was checked).
+- `run_manifest.json` gains `grounding: {synthesis_items, items_total, synthesis_ratio}` on every
+  run and a `warnings` list that fires past `config.SYNTHESIS_ITEM_WARN_RATIO = 0.25`.
+- `group_id` excluded from the LLM prompt via `spec.model_dump(exclude=...)` — the open item
+  stage 2 handed forward.
+
+**Deviations from spec:** none.
+
+**The point of the stage, stated plainly.** A synthesis item is a question **not backed by the
+student's own material**. For an algorithmic trace that is pedagogically correct — an exam
+should not reuse the tree from the slides — and everywhere else it is an unwelcome surprise,
+because a student cannot revise a novel game tree from their own upload (§7). So the count is
+reported at *every* value, not only when it warns, exactly as `fill_ratio` and
+`allocation_fidelity` made earlier invisible degradations visible. It is counted over the
+**specs**, not the surviving items: "how much of this paper was invented" is a property of what
+the blueprint asked for, and counting only what passed validation would move the number for
+reasons that have nothing to do with grounding.
+
+**Why `not_applicable` is not folded into `skipped`.** They answer different questions.
+`skipped` is a bool about the GATE — no scorer was injected, so it never ran. `not_applicable`
+is an int about ITEMS — how many the gate legitimately does not apply to. "We could not check"
+and "there is nothing to check against" are not the same thing, and the second is the more
+important one. For a gate that ran, `evaluated + not_applicable == items that reached it`.
+
+**One design call worth reviewing.** The synthesis check sits *before* the scorer-injection
+branch, so `not_applicable` is counted even when `skipped` is True. Reasoning: applicability is
+a property of the item, not of what the caller injected, and a run with no scorer AND synthesis
+items should report both facts rather than let the louder one swallow the quieter. The cost is
+that on a skipped gate `evaluated` is 0 by construction, so the sum above is short of what
+reached the gate; `skipped` is what says why. The alternative — check the scorer first — makes
+the invariant hold unconditionally but re-collapses the distinction in exactly the case the
+stage exists to prevent.
+
+**Backward compatibility.** `ItemSpec` gained two optional fields, so a raw `model_dump()`
+cannot be byte-identical by construction — the same was true when stage 2 added
+`format_requirement` and `group_id`. The proof is therefore four-part, run in a separate process
+asserting `coursegen` resolved to `E:\Qoder\prepify\coursegen` via `os.path.normcase`
+(Windows separators are what silently defeated this same check in stage 2):
+
+```
+PASS: 61 ItemSpecs across 3 shipped blueprints byte-identical on every pre-existing field;
+      61 spec_hashes unchanged; both new fields at their defaults; CoverageReports unchanged.
+  final_default   : 6253ae42410bf7b4...  (first of 32)
+  midterm_default : 974c8d10c9439ed9...  (first of 22)
+  quiz_default    : 786779eaff2bc0c6...  (first of 7)
+```
+
+The stage-2 test `test_spec_hash_matches_the_pre_amendment_encoding` also still passes
+unmodified, and it re-derives the pre-amendment encoding by hand rather than calling the
+function under suspicion — it caught mutation M1 below on its own.
+
+**Mutation results:** 8/8 caught, each asserting `mutated != original` before the run was
+trusted, and each file restored byte-identically afterwards.
+
+| # | Mutation | Caught by |
+|---|---|---|
+| M1 | `grounding` encoded unconditionally (the trailing-separator trap) | stage-2 `test_spec_hash_matches_the_pre_amendment_encoding` |
+| M2 | `grounding` dropped from `spec_hash` | `test_grounding_joins_spec_hash_only_when_not_the_default` |
+| M3 | synthesis item counted as evaluated+passed | `test_a_synthesis_item_is_not_applicable_rather_than_evaluated` |
+| M4 | `group_id` returns to the prompt | `test_group_id_is_absent_from_the_prompt` |
+| M5 | `generation_instructions` dropped from `spec_hash` | `test_joins_spec_hash_only_when_set` |
+| M6 | `generation_instructions` templated into the SYSTEM prompt (L10) | `test_never_reaches_the_system_prompt` |
+| M7 | synthesis count omitted from the manifest | `test_an_all_span_paper_reports_zero_rather_than_nothing` |
+| M8 | the ratio warning never fires | `test_a_paper_over_the_ratio_warns` |
+
+**L5 — token estimate, checked against what is actually sent.** `_estimate_tokens` sums
+`len(m["content"])` over the messages, and `generation_instructions` is serialised into the user
+message, so the estimate covers it **exactly** — including `json.dumps` `ensure_ascii` expansion
+of non-ASCII text, which makes the counted string longer than the raw instruction rather than
+shorter. No blind spot is introduced by this stage. Two **pre-existing** under-counts were found
+and deliberately not fixed (out of scope): the estimate ignores the JSON envelope (~965 estimated
+vs ~1059 wire tokens on a full batch) and ignores the `response_format` JSON schema, which is
+~347 tokens on *every* generation call — together roughly a 35–45% under-count on the cap check.
+`record_call` corrects this afterwards from the provider's real `usage.total_tokens`, but
+`check_call`, which is the cap gate, uses the under-count. Recorded in todo.md.
+
+**Amplification, measured.** The instruction rides in the per-spec payload, so one section's
+text is repeated once per spec: a 220-char instruction costs +56 estimated tokens at 1 spec and
++335 at `BATCH_SIZE = 6` (6.0x). At the 20-call cap that is ~6,700 of a 60,000-token budget —
+bounded today, but the field is *unbounded free text* and the cost scales linearly, so a
+~2,000-char instruction alone would approach the whole per-exam cap. Recorded in todo.md; not
+capped here, because no length limit was specified and inventing one is not this stage's call.
+
+**Existing tests modified:** none. All 314 pass unmodified.
+
+**Gate command:**
+```
+$ python -m pytest
+350 passed, 3 warnings in 12.09s
+
+$ python -m coursegen --dry-run
+=== No network calls were made ===   (exit 0)
+```
+**Result:** PASS
+
+**Known issues carried forward (recorded by the implementing agent, not resolved):**
+- **`not_applicable` was added to gate 2 only.** The brief states the invariant "for any gate",
+  but the work item is explicitly about gate 2. Gate 4 (MCQ hygiene) has the same shape — a
+  `short` item reaches it and is neither evaluated nor counted — so the invariant is literally
+  true for gate 2 and not for gate 4. Widening it was not authorised and was not invented.
+- **`spec_hash` optional fields are positional and untagged.** Each is appended only when
+  present, so a `generation_instructions` whose entire text is the word `"synthesis"` would hash
+  identically to a synthesis section carrying no instructions. Tagging them would change every
+  existing hash, which is the one thing that function must not do.
+- **`slot_id` and `eligibility` still reach the prompt while staying out of `spec_hash`** — the
+  same class of defect `group_id` was just fixed for. `slot_id` is load-bearing (the model must
+  label each output) so it cannot simply be dropped; `eligibility` probably can. Not authorised
+  in this stage.
+- **`spec_hash` and `node_id` are still sent to the model** and it can use neither. Reporting
+  only, per the brief.
+- **`--dry-run` does not exercise `build_generation_messages`.** It prints a hand-written sample
+  prompt that is not `SYSTEM_PROMPT`, so the command verifies the budget path but proves nothing
+  about the real prompt. Pre-existing; L10 byte-identity is covered by tests instead.
+- **`SYNTHESIS_ITEM_WARN_RATIO = 0.25` is a starting value, not a measured one**, and is
+  commented as such.

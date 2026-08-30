@@ -304,6 +304,10 @@ def _solve_section(
             # expands into share the section's group_id, and the renderer will
             # later group them under one question number.
             group_id=section.group_id,
+            # Carried through unchanged. "span" on every item the three shipped
+            # blueprints produce, which is the default and current behaviour.
+            grounding=section.grounding,
+            generation_instructions=section.generation_instructions,
             spec_hash=_spec_hash(
                 node.node_id,
                 spans,
@@ -312,6 +316,8 @@ def _solve_section(
                 section.marks_each,
                 section.options_count,
                 section.format_requirement,
+                section.grounding,
+                section.generation_instructions,
             ),
         )
         items.append(spec)
@@ -507,6 +513,8 @@ def _spec_hash(
     marks: int,
     options_count: Optional[int],
     format_requirement: Optional[str] = None,
+    grounding: str = "span",
+    generation_instructions: Optional[str] = None,
 ) -> str:
     """LLM generation cache key.
 
@@ -523,6 +531,29 @@ def _spec_hash(
     identical hashes to before this field existed — the three shipped blueprints
     keep their cache entries and their ItemSpec[] unchanged.
 
+    grounding and generation_instructions JOIN the key on the same reasoning and
+    with the same trailing-separator care (§6.4, §6.6). grounding changes the
+    prompt more fundamentally than anything else here — whether the item is
+    drawn from the span at all — so two otherwise-identical items must not share
+    a cache entry across it. It is appended ONLY WHEN IT IS NOT THE DEFAULT
+    "span": encoding the default would change EVERY existing hash and silently
+    invalidate the on-disk generation cache for all three shipped blueprints.
+    generation_instructions is appended only when set, for the same reason.
+
+    ORDER is fixed — format_requirement, then grounding, then
+    generation_instructions — and each is appended only when present, so the
+    combinations are unambiguous in practice: a section carrying only
+    `grounding="synthesis"` encodes "…|synthesis", and one carrying only
+    `format_requirement="MATHEMATICAL_MODELING"` encodes
+    "…|MATHEMATICAL_MODELING". These cannot collide because the value spaces are
+    disjoint — grounding is the two-value Literal, formats are validated against
+    config.KNOWN_FORMAT_REQUIREMENTS, and neither contains the other's values.
+    generation_instructions is free text and COULD in principle equal one of
+    them; a section whose whole instruction text is the single word "synthesis"
+    would hash like a synthesis section. Recorded rather than defended against:
+    a positional-tag encoding would change every existing hash, which is the
+    thing this function must not do.
+
     group_id is deliberately absent: it is presentational, changing how items are
     displayed rather than what is asked, so regrouping must not invalidate the
     cache.
@@ -537,4 +568,8 @@ def _spec_hash(
     ]
     if format_requirement is not None:
         parts.append(format_requirement)
+    if grounding != "span":
+        parts.append(grounding)
+    if generation_instructions is not None:
+        parts.append(generation_instructions)
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
