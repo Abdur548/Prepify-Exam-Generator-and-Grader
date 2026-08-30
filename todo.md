@@ -624,3 +624,18 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] Late chunking (PRD §15 — out of MVP1 scope)
 - [ ] Multi-provider abstraction (PRD §15 — explicitly prohibited)
 - [ ] 2-span `long` items — the contract allows 1–2 spans, the solver emits 1
+
+---
+
+## P5 — UI + resilience  [PARTIAL — code tests PASS 2026-08-30; pipeline wiring pending]
+
+- [x] `app/preflight.py` — R8 pre-flight check for API key, output dir, WeasyPrint, Qdrant.
+- [x] `app/main.py` — FastAPI app skeleton; S7 disclosure gate; degraded mode for
+      `BudgetExceeded` and `TimeoutException`; no stack traces in responses.
+- [x] `tests/test_p5_app.py` — 14 TDD tests covering preflight, disclosure, degraded mode, chat.
+- [ ] Wire `_run_exam_pipeline` to real ingest → allocate → generate → render stages.
+- [ ] Wire `_run_chat_query` to real retrieve → rerank → answer_question path.
+- [ ] Build static HTML UI: upload form, progress view, download links, chat tab.
+- [ ] Browser end-to-end gate: upload → ingest → generate → download → chat.
+- [ ] Integration test: network killed mid-generation → degraded JSON shown in browser.
+- [ ] Fix `@app.on_event("startup")` deprecation to `lifespan` pattern.

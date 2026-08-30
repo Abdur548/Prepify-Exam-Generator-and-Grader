@@ -12,7 +12,7 @@
 | P3 | Generation + validation | PASS | `pytest tests/test_p3_generation_validation.py -v` | 2026-08-28 |
 | P4 | Render + chat | PARTIAL | `pytest tests/test_p4_render_chat.py -v` PASS; real `import weasyprint` FAILED | 2026-08-28 |
 | P1 | Ingest fixes — `.ppt`, `.docx`, chunk page precision | PASS | `python -m pytest` (211) + `python -m coursegen --dry-run`; P1 idempotency + point-count gates re-verified | 2026-08-28 |
-| P5 | UI + resilience | NOT STARTED | | |
+| P5 | UI + resilience | PARTIAL | `pytest tests/test_p5_app.py` 14/14 PASS; browser end-to-end gate pending pipeline wiring | 2026-08-30 |
 | P6 | Evaluation + baseline | NOT STARTED | | |
 | P7 | Hardening + rehearsal | NOT STARTED | | |
 
@@ -1579,3 +1579,131 @@ $ python -m pytest
 240 passed in 14.97s
 ```
 **Result:** PASS
+
+---
+
+## P5 — UI + resilience
+
+**Status:** PARTIAL — pre-flight, degraded-mode logic, disclosure gating, and API
+routes are implemented and tested. The browser end-to-end gate requires
+`_run_exam_pipeline` and `_run_chat_query` to be wired to the real P1–P4 stages,
+which remains the open item.
+
+**Built:**
+- `app/preflight.py` — `run_preflight_checks()` / `preflight_status()`; raises
+  `RuntimeError` with a human-readable message for each of API key, output dir
+  writability, WeasyPrint GTK, and Qdrant openability.
+- `app/main.py` — FastAPI app; pre-flight at startup; `POST /api/disclosure/accept`
+  (S7 one-time disclosure gate); `POST /api/exam` catches `BudgetExceeded` and
+  `httpx.TimeoutException` and returns a degraded JSON result rather than a 500;
+  `POST /api/chat`; `GET /api/health`; `GET /api/preflight`; internal reset helper
+  for test isolation.
+- `tests/test_p5_app.py` — 14 TDD tests.
+
+**Files touched:**
+`app/preflight.py`, `app/main.py`, `tests/test_p5_app.py`, `progress.md`, `todo.md`
+
+**Deviations from spec:**
+- `_run_exam_pipeline` and `_run_chat_query` raise `NotImplementedError` — the
+  pipeline wiring (ingest → allocate → generate → render, and chat retrieval) is
+  the remaining work before P5 PASS. The API surface and behavioral contracts
+  (degraded mode, disclosure, no stack traces, pre-flight errors) are implemented
+  and tested.
+- Static UI HTML is not yet built; the `/` route does not exist. The TestClient
+  tests cover the JSON API behavior.
+- `@app.on_event("startup")` is deprecated in favor of FastAPI's `lifespan` API.
+  Three warnings appear in the test output; the behavior is unchanged. Will update
+  when P5 moves toward PASS.
+
+**TDD RED command:**
+```
+$ python -m pytest tests/test_p5_app.py -q
+FFFFFFFFEEEEEEEEE  [100%]
+... failures: P5 preflight module missing; P5 app module missing
+```
+**Result:** expected RED.
+
+**Gate command (dependency-free P5 code):**
+```
+$ python -m pytest tests/test_p5_app.py
+14 passed, 3 warnings in 2.62s
+```
+**Result:** PASS for implemented behavior.
+
+**Full suite:**
+```
+$ python -m pytest
+254 passed, 3 warnings in 11.21s
+```
+**Result:** PASS.
+
+**Post-phase verification:**
+- [x] `run_preflight_checks()` raises `RuntimeError` with "GEMINI_API_KEY" for missing key.
+- [x] Unwritable output dir raises `RuntimeError` with "output" in message.
+- [x] WeasyPrint failure propagates with "WeasyPrint" in message.
+- [x] Qdrant failure propagates with "Qdrant" in message.
+- [x] All checks passing → no exception raised.
+- [x] `POST /api/exam` without disclosure → 403 with "disclosure" in detail.
+- [x] `POST /api/disclosure/accept` → 200 `{"accepted": true}`.
+- [x] `POST /api/exam` after disclosure with `BudgetExceeded` → 200 `{"status": "degraded"}`, no stack trace, no exception class names.
+- [x] `POST /api/exam` with `TimeoutException` → same degraded shape.
+- [x] `POST /api/chat` with grounded mock → 200 with `from_material=true` and `citations`.
+- [x] `POST /api/chat` with ungrounded mock → 200 with `from_material=false` and "not from your material" marker.
+- [x] `GET /api/preflight` → dict with `api_key`, `output_dir`, `weasyprint`, `qdrant` keys.
+
+**Known issues carried forward:**
+- `_run_exam_pipeline` not yet wired — `POST /api/exam` always raises `NotImplementedError` without the pipeline mock in tests.
+- `_run_chat_query` not yet wired — same.
+- Static UI HTML (upload form, progress view, download links, chat tab) not yet built.
+- `@app.on_event("startup")` deprecation warning.
+- Browser end-to-end gate and "network killed mid-generation → degraded" integration test both pending pipeline wiring.
+
+### Reviewer corrections on the P5 preflight (2026-08-29)
+
+**1. R8's "models present on disk" check was missing.**
+The preflight covered API key, output directory, WeasyPrint and Qdrant — but not the one
+R8 names first. It is also the one with an incident behind it:
+`cross-encoder/ms-marco-MiniLM-L-6-v2` was absent from this machine until 2026-08-29, so
+the groundedness gate and the chat reranker had only ever run against injected stubs and
+nothing said so — the server started perfectly. On a cold demo machine **both** models
+are missing, ingest may still appear to work if one is cached, and the failure lands on
+the first chat query. That is precisely what R8 exists to prevent: *"Fail at startup with
+a clear message — never mid-demo."*
+
+Added `_check_models_present()`, wired into both `run_preflight_checks` and
+`preflight_status`. The lookup is **cache-only** (`try_to_load_from_cache`) and makes no
+network call — a preflight that can block on a 90 MB download is not a preflight, and an
+offline machine must report "missing" rather than hang. `huggingface-hub` declared in
+`pyproject.toml` on the same reasoning as `numpy`: already installed transitively, now a
+direct import.
+
+**2. S8 was documented in three places and enforced in none.**
+`README.md`, `__main__.py` and `index.py` all say `--workers 1`; nothing detected a
+violation. The preflight already opens Qdrant, and in a multi-worker run the second
+worker's preflight is exactly what fails on the exclusive file lock — so the message now
+names the cause. That turns what the PRD calls *"a random failure on the demo machine"*
+into a self-diagnosing one, with no new machinery. Documentation does not stop anyone
+typing `--workers 4`.
+
+**3. Three existing preflight tests made environment-independent.**
+`test_raises_on_weasyprint_unavailable`, `test_raises_on_qdrant_not_openable` and
+`test_passes_silently_when_all_conditions_met` now reach the models check, so they would
+otherwise pass or fail according to whether *this* machine had the models cached. They
+patch it out; the models check has its own tests where cache state is controlled
+explicitly. No assertion weakened.
+
+**Method note, worth recording.** The first mutation test I ran on these guards reported
+both as caught. It was wrong: one replacement string never matched, so the mutation
+silently did not apply and the "pass" meant nothing — the same mechanism-never-ran
+failure this project keeps producing, this time in my own verification. Re-run with
+`assert mutated != orig`, the truth appeared: the `--workers 1` guard bit, the models
+guard **did not**, because every test called `_check_models_present()` directly and none
+asserted that the startup sequence invokes it.
+`test_run_preflight_checks_actually_invokes_it` closes that. Both mutations now fail.
+
+**Gate:**
+```
+$ python -m pytest
+260 passed, 3 warnings in 14.14s
+```
+**Result:** PASS (P5 stays PARTIAL — browser end-to-end still pending pipeline wiring)

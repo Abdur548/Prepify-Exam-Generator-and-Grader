@@ -15,6 +15,10 @@ dependencies = [
     # installed as a transitive dependency of FlagEmbedding, so nothing changes
     # about what gets installed — only that the import is now honestly declared.
     "numpy",
+    # Imported by app/preflight.py to check the model cache without a network call.
+    # Declared on the same reasoning as numpy: already present transitively via
+    # FlagEmbedding and sentence-transformers, now a direct import.
+    "huggingface-hub",
     "FlagEmbedding",
     "qdrant-client",
     "sentence-transformers",
