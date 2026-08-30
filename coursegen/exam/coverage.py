@@ -102,19 +102,43 @@ def build_report(
 
 
 def _bloom_realised(items: Optional[list[ItemSpec]]) -> dict[str, float]:
-    """Bloom level → fraction of the EMITTED items carrying it.
+    """Bloom level → share of the EMITTED paper's MARKS carrying it.
 
-    Empty when nothing was emitted: a paper with no items has no realised
-    distribution, and inventing one (or dividing by zero) would be worse than
-    saying nothing. Keys are sorted so the report is byte-stable.
+    Weighted by marks, not counted by item. A 20-mark algorithmic trace does not
+    carry the same cognitive weight as a 2-mark true/false, and a Table of
+    Specifications states its Bloom distribution the same way — by weight.
+
+    This was a bug, caught on the first real authored blueprint. Counting items
+    made `template_ai_fundamentals_v1` look 30 points adrift on two levels and
+    fired a divergence warning, while by marks it is exact:
+
+        level                 declared   by ITEMS   by MARKS
+        APPLY_ANALYZE             0.70       0.40       0.70
+        REMEMBER_UNDERSTAND       0.20       0.50       0.20
+        EVALUATE                  0.10       0.10       0.10
+
+    The declared target is a marks distribution, so a realised figure counted by
+    item compares two different quantities and reports a paper as unbalanced when
+    it is exactly on target. A false alarm costs as much as a miss: it teaches
+    everyone to ignore the one signal that would catch a paper drifting to easy
+    recall questions.
+
+    Empty when nothing was emitted — a paper with no items has no realised
+    distribution, and inventing one (or dividing by zero) is worse than saying
+    nothing. Keys are sorted so the report is byte-stable.
     """
     if not items:
         return {}
-    counts: dict[str, int] = defaultdict(int)
+    marks: dict[str, int] = defaultdict(int)
     for item in items:
-        counts[item.bloom] += 1
-    total = len(items)
-    return {level: counts[level] / total for level in sorted(counts)}
+        marks[item.bloom] += item.marks
+    total = sum(marks.values())
+    if total <= 0:
+        # Every emitted item is worth zero marks — a malformed blueprint would
+        # have been rejected by the marks-sum validator, so this means an empty
+        # or degenerate paper. Report nothing rather than divide by zero.
+        return {}
+    return {level: marks[level] / total for level in sorted(marks)}
 
 
 def _cognitive_balance_warnings(

@@ -1,0 +1,973 @@
+[
+  {
+    "node_id": "ai01",
+    "path": [
+      "Ch 1 Introduction to Artificial Intelligence",
+      "1.1 What Is Artificial Intelligence"
+    ],
+    "source_file": "ai_l01_intro.pdf",
+    "page_span": [
+      1,
+      6
+    ],
+    "token_count": 380,
+    "chunk_ids": [
+      "chunk_ai01_a",
+      "chunk_ai01_b",
+      "chunk_ai01_c"
+    ],
+    "key_terms": [
+      "artificial intelligence",
+      "rational agent",
+      "Turing test",
+      "weak AI",
+      "strong AI",
+      "foundations of AI",
+      "acting rationally",
+      "thinking humanly",
+      "history of the field",
+      "intelligent behaviour"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.029804
+  },
+  {
+    "node_id": "ai02",
+    "path": [
+      "Ch 1 Introduction to Artificial Intelligence",
+      "1.2 Intelligent Agents and Rational Behaviour"
+    ],
+    "source_file": "ai_l01_intro.pdf",
+    "page_span": [
+      7,
+      13
+    ],
+    "token_count": 430,
+    "chunk_ids": [
+      "chunk_ai02_a",
+      "chunk_ai02_b",
+      "chunk_ai02_c"
+    ],
+    "key_terms": [
+      "intelligent agent",
+      "rational behaviour",
+      "PEAS description",
+      "task environment",
+      "percept sequence",
+      "agent program",
+      "performance measure",
+      "actuator",
+      "sensor",
+      "reflex agent"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.033725
+  },
+  {
+    "node_id": "ai03",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.1 Problem Formulation and State Spaces"
+    ],
+    "source_file": "ai_l02_search.pdf",
+    "page_span": [
+      1,
+      7
+    ],
+    "token_count": 450,
+    "chunk_ids": [
+      "chunk_ai03_a",
+      "chunk_ai03_b",
+      "chunk_ai03_c"
+    ],
+    "key_terms": [
+      "problem formulation",
+      "state space",
+      "initial state",
+      "goal test",
+      "path cost",
+      "successor function",
+      "solution path",
+      "abstraction",
+      "toy problem",
+      "real-world problem"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.035294
+  },
+  {
+    "node_id": "ai04",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.2 Tree Search and Graph Search"
+    ],
+    "source_file": "ai_l02_search.pdf",
+    "page_span": [
+      8,
+      14
+    ],
+    "token_count": 440,
+    "chunk_ids": [
+      "chunk_ai04_a",
+      "chunk_ai04_b",
+      "chunk_ai04_c"
+    ],
+    "key_terms": [
+      "tree search",
+      "graph search",
+      "frontier",
+      "explored set",
+      "node expansion",
+      "repeated state",
+      "search strategy",
+      "branching factor",
+      "redundant path",
+      "expansion order"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.03451
+  },
+  {
+    "node_id": "ai05",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.3 Uninformed Search: BFS and Uniform-Cost"
+    ],
+    "source_file": "ai_l02_search.pdf",
+    "page_span": [
+      15,
+      23
+    ],
+    "token_count": 520,
+    "chunk_ids": [
+      "chunk_ai05_a",
+      "chunk_ai05_b",
+      "chunk_ai05_c",
+      "chunk_ai05_d"
+    ],
+    "key_terms": [
+      "breadth-first search",
+      "BFS",
+      "uniform-cost search",
+      "completeness",
+      "optimality",
+      "time complexity",
+      "space complexity",
+      "FIFO queue",
+      "shallowest node",
+      "step cost"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.040784
+  },
+  {
+    "node_id": "ai06",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.4 Uninformed Search: DFS and Iterative Deepening"
+    ],
+    "source_file": "ai_l02_search.pdf",
+    "page_span": [
+      24,
+      32
+    ],
+    "token_count": 500,
+    "chunk_ids": [
+      "chunk_ai06_a",
+      "chunk_ai06_b",
+      "chunk_ai06_c",
+      "chunk_ai06_d"
+    ],
+    "key_terms": [
+      "depth-first search",
+      "DFS",
+      "iterative deepening",
+      "depth limit",
+      "LIFO stack",
+      "backtracking",
+      "memory requirement",
+      "incompleteness",
+      "deepest node",
+      "depth-limited search"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.039216
+  },
+  {
+    "node_id": "ai07",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.5 Informed Search: Greedy Best-First and A*"
+    ],
+    "source_file": "ai_l03_informed.pdf",
+    "page_span": [
+      1,
+      9
+    ],
+    "token_count": 510,
+    "chunk_ids": [
+      "chunk_ai07_a",
+      "chunk_ai07_b",
+      "chunk_ai07_c",
+      "chunk_ai07_d"
+    ],
+    "key_terms": [
+      "informed search",
+      "greedy best-first search",
+      "A* search",
+      "evaluation function",
+      "heuristic estimate",
+      "optimality proof",
+      "frontier ordering",
+      "node expansion",
+      "optimally efficient",
+      "cost so far"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.04
+  },
+  {
+    "node_id": "ai08",
+    "path": [
+      "Ch 2 Problem Solving by Search",
+      "2.6 Heuristics: Admissibility and Consistency"
+    ],
+    "source_file": "ai_l03_informed.pdf",
+    "page_span": [
+      10,
+      17
+    ],
+    "token_count": 470,
+    "chunk_ids": [
+      "chunk_ai08_a",
+      "chunk_ai08_b",
+      "chunk_ai08_c",
+      "chunk_ai08_d"
+    ],
+    "key_terms": [
+      "admissible heuristic",
+      "consistency",
+      "triangle inequality",
+      "dominance",
+      "relaxed problem",
+      "heuristic function",
+      "effective branching factor",
+      "Manhattan distance",
+      "overestimate",
+      "pattern database"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.036863
+  },
+  {
+    "node_id": "ai09",
+    "path": [
+      "Ch 3 Adversarial Search and Games",
+      "3.1 Game Trees and the Minimax Algorithm"
+    ],
+    "source_file": "ai_l04_games.pdf",
+    "page_span": [
+      1,
+      8
+    ],
+    "token_count": 480,
+    "chunk_ids": [
+      "chunk_ai09_a",
+      "chunk_ai09_b",
+      "chunk_ai09_c"
+    ],
+    "key_terms": [
+      "game tree",
+      "minimax",
+      "zero-sum game",
+      "ply",
+      "terminal utility",
+      "backed-up value",
+      "two-player game",
+      "optimal play",
+      "MAX player",
+      "MIN player"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.037647
+  },
+  {
+    "node_id": "ai10",
+    "path": [
+      "Ch 3 Adversarial Search and Games",
+      "3.2 Alpha-Beta Pruning"
+    ],
+    "source_file": "ai_l04_games.pdf",
+    "page_span": [
+      9,
+      17
+    ],
+    "token_count": 500,
+    "chunk_ids": [
+      "chunk_ai10_a",
+      "chunk_ai10_b",
+      "chunk_ai10_c"
+    ],
+    "key_terms": [
+      "alpha-beta pruning",
+      "pruned branch",
+      "alpha cutoff",
+      "beta cutoff",
+      "move ordering",
+      "minimax value",
+      "node ordering",
+      "effective branching factor",
+      "propagated value",
+      "search efficiency"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.039216
+  },
+  {
+    "node_id": "ai11",
+    "path": [
+      "Ch 3 Adversarial Search and Games",
+      "3.3 Imperfect Real-Time Decisions and Evaluation Functions"
+    ],
+    "source_file": "ai_l04_games.pdf",
+    "page_span": [
+      18,
+      24
+    ],
+    "token_count": 420,
+    "chunk_ids": [
+      "chunk_ai11_a",
+      "chunk_ai11_b",
+      "chunk_ai11_c"
+    ],
+    "key_terms": [
+      "evaluation function",
+      "cutoff test",
+      "quiescence",
+      "horizon effect",
+      "real-time decision",
+      "feature weight",
+      "material value",
+      "depth limit",
+      "approximate utility",
+      "expectiminimax"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.032941
+  },
+  {
+    "node_id": "ai12",
+    "path": [
+      "Ch 4 Constraint Satisfaction Problems",
+      "4.1 Defining Constraint Satisfaction Problems"
+    ],
+    "source_file": "ai_l05_csp.pdf",
+    "page_span": [
+      1,
+      8
+    ],
+    "token_count": 460,
+    "chunk_ids": [
+      "chunk_ai12_a",
+      "chunk_ai12_b",
+      "chunk_ai12_c"
+    ],
+    "key_terms": [
+      "constraint satisfaction",
+      "variable",
+      "domain",
+      "constraint graph",
+      "map colouring",
+      "unary constraint",
+      "binary constraint",
+      "assignment",
+      "consistent assignment",
+      "factored representation"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.036078
+  },
+  {
+    "node_id": "ai13",
+    "path": [
+      "Ch 4 Constraint Satisfaction Problems",
+      "4.2 Backtracking Search with MRV and Degree Heuristics"
+    ],
+    "source_file": "ai_l05_csp.pdf",
+    "page_span": [
+      9,
+      17
+    ],
+    "token_count": 510,
+    "chunk_ids": [
+      "chunk_ai13_a",
+      "chunk_ai13_b",
+      "chunk_ai13_c",
+      "chunk_ai13_d"
+    ],
+    "key_terms": [
+      "backtracking search",
+      "minimum remaining values",
+      "MRV heuristic",
+      "degree heuristic",
+      "least constraining value",
+      "variable ordering",
+      "value ordering",
+      "partial assignment",
+      "failure",
+      "search tree"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.04
+  },
+  {
+    "node_id": "ai14",
+    "path": [
+      "Ch 4 Constraint Satisfaction Problems",
+      "4.3 Constraint Propagation and Arc Consistency"
+    ],
+    "source_file": "ai_l05_csp.pdf",
+    "page_span": [
+      18,
+      26
+    ],
+    "token_count": 490,
+    "chunk_ids": [
+      "chunk_ai14_a",
+      "chunk_ai14_b",
+      "chunk_ai14_c",
+      "chunk_ai14_d"
+    ],
+    "key_terms": [
+      "arc consistency",
+      "AC-3",
+      "constraint propagation",
+      "domain pruning",
+      "forward checking",
+      "inference",
+      "revised domain",
+      "node consistency",
+      "path consistency",
+      "propagation queue"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.038431
+  },
+  {
+    "node_id": "ai15",
+    "path": [
+      "Ch 5 Logical Agents",
+      "5.1 Propositional Logic and Entailment"
+    ],
+    "source_file": "ai_l06_logic.pdf",
+    "page_span": [
+      1,
+      9
+    ],
+    "token_count": 470,
+    "chunk_ids": [
+      "chunk_ai15_a",
+      "chunk_ai15_b",
+      "chunk_ai15_c"
+    ],
+    "key_terms": [
+      "propositional logic",
+      "entailment",
+      "truth table",
+      "model checking",
+      "conjunctive normal form",
+      "resolution",
+      "knowledge base",
+      "satisfiability",
+      "inference rule",
+      "logical equivalence"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": true,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.036863
+  },
+  {
+    "node_id": "ai16",
+    "path": [
+      "Ch 5 Logical Agents",
+      "5.2 First-Order Logic and Inference"
+    ],
+    "source_file": "ai_l06_logic.pdf",
+    "page_span": [
+      10,
+      19
+    ],
+    "token_count": 520,
+    "chunk_ids": [
+      "chunk_ai16_a",
+      "chunk_ai16_b",
+      "chunk_ai16_c"
+    ],
+    "key_terms": [
+      "first-order logic",
+      "quantifier",
+      "unification",
+      "forward chaining",
+      "backward chaining",
+      "predicate",
+      "term",
+      "substitution",
+      "Horn clause",
+      "universal instantiation"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.040784
+  },
+  {
+    "node_id": "ai17",
+    "path": [
+      "Ch 6 Reasoning under Uncertainty",
+      "6.1 Probability, Independence and Bayes Rule"
+    ],
+    "source_file": "ai_l07_uncertainty.pdf",
+    "page_span": [
+      1,
+      9
+    ],
+    "token_count": 480,
+    "chunk_ids": [
+      "chunk_ai17_a",
+      "chunk_ai17_b",
+      "chunk_ai17_c"
+    ],
+    "key_terms": [
+      "conditional probability",
+      "Bayes rule",
+      "prior probability",
+      "posterior probability",
+      "independence",
+      "full joint distribution",
+      "product rule",
+      "normalisation",
+      "random variable",
+      "evidence"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.037647
+  },
+  {
+    "node_id": "ai18",
+    "path": [
+      "Ch 6 Reasoning under Uncertainty",
+      "6.2 Bayesian Networks and Exact Inference"
+    ],
+    "source_file": "ai_l07_uncertainty.pdf",
+    "page_span": [
+      10,
+      19
+    ],
+    "token_count": 530,
+    "chunk_ids": [
+      "chunk_ai18_a",
+      "chunk_ai18_b",
+      "chunk_ai18_c"
+    ],
+    "key_terms": [
+      "Bayesian network",
+      "conditional independence",
+      "conditional probability table",
+      "inference by enumeration",
+      "variable elimination",
+      "directed acyclic graph",
+      "parent node",
+      "joint distribution",
+      "d-separation",
+      "exact inference"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.041569
+  },
+  {
+    "node_id": "ai19",
+    "path": [
+      "Ch 7 Making Complex Decisions",
+      "7.1 Markov Decision Processes"
+    ],
+    "source_file": "ai_l08_mdp.pdf",
+    "page_span": [
+      1,
+      10
+    ],
+    "token_count": 540,
+    "chunk_ids": [
+      "chunk_ai19_a",
+      "chunk_ai19_b",
+      "chunk_ai19_c",
+      "chunk_ai19_d"
+    ],
+    "key_terms": [
+      "Markov decision process",
+      "transition model",
+      "reward function",
+      "discount factor",
+      "stochastic environment",
+      "Markov property",
+      "sequential decision problem",
+      "utility of a sequence",
+      "action",
+      "state"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.042353
+  },
+  {
+    "node_id": "ai20",
+    "path": [
+      "Ch 7 Making Complex Decisions",
+      "7.2 Bellman Equations and Value Iteration"
+    ],
+    "source_file": "ai_l08_mdp.pdf",
+    "page_span": [
+      11,
+      20
+    ],
+    "token_count": 550,
+    "chunk_ids": [
+      "chunk_ai20_a",
+      "chunk_ai20_b",
+      "chunk_ai20_c",
+      "chunk_ai20_d"
+    ],
+    "key_terms": [
+      "Bellman equation",
+      "value iteration",
+      "utility of a state",
+      "Bellman update",
+      "convergence",
+      "Markov decision process",
+      "optimal utility",
+      "iteration sweep",
+      "contraction",
+      "discounted reward"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": true,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.043137
+  },
+  {
+    "node_id": "ai21",
+    "path": [
+      "Ch 7 Making Complex Decisions",
+      "7.3 Policy Iteration and Optimal Policies"
+    ],
+    "source_file": "ai_l08_mdp.pdf",
+    "page_span": [
+      21,
+      29
+    ],
+    "token_count": 500,
+    "chunk_ids": [
+      "chunk_ai21_a",
+      "chunk_ai21_b",
+      "chunk_ai21_c"
+    ],
+    "key_terms": [
+      "policy iteration",
+      "policy evaluation",
+      "policy improvement",
+      "optimal policy",
+      "policy extraction",
+      "greedy policy",
+      "stationary policy",
+      "linear equations",
+      "action selection",
+      "value function"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.039216
+  },
+  {
+    "node_id": "ai22",
+    "path": [
+      "Ch 8 Reinforcement Learning",
+      "8.1 Passive and Active Reinforcement Learning"
+    ],
+    "source_file": "ai_l09_rl.pdf",
+    "page_span": [
+      1,
+      9
+    ],
+    "token_count": 490,
+    "chunk_ids": [
+      "chunk_ai22_a",
+      "chunk_ai22_b",
+      "chunk_ai22_c"
+    ],
+    "key_terms": [
+      "passive reinforcement learning",
+      "active reinforcement learning",
+      "exploration",
+      "exploitation",
+      "model-free",
+      "direct utility estimation",
+      "adaptive dynamic programming",
+      "reward signal",
+      "episode",
+      "greedy agent"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.038431
+  },
+  {
+    "node_id": "ai23",
+    "path": [
+      "Ch 8 Reinforcement Learning",
+      "8.2 Temporal-Difference Learning and SARSA"
+    ],
+    "source_file": "ai_l09_rl.pdf",
+    "page_span": [
+      10,
+      19
+    ],
+    "token_count": 520,
+    "chunk_ids": [
+      "chunk_ai23_a",
+      "chunk_ai23_b",
+      "chunk_ai23_c"
+    ],
+    "key_terms": [
+      "temporal-difference learning",
+      "SARSA",
+      "on-policy",
+      "update rule",
+      "learning rate",
+      "TD error",
+      "bootstrapping",
+      "sample transition",
+      "state-action pair",
+      "convergence"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.040784
+  },
+  {
+    "node_id": "ai24",
+    "path": [
+      "Ch 8 Reinforcement Learning",
+      "8.3 Q-Learning and Exploration Policies"
+    ],
+    "source_file": "ai_l09_rl.pdf",
+    "page_span": [
+      20,
+      29
+    ],
+    "token_count": 530,
+    "chunk_ids": [
+      "chunk_ai24_a",
+      "chunk_ai24_b",
+      "chunk_ai24_c"
+    ],
+    "key_terms": [
+      "Q-learning",
+      "off-policy",
+      "epsilon-greedy",
+      "action-value function",
+      "exploration policy",
+      "greedy in the limit",
+      "convergence",
+      "maximum over actions",
+      "exploration function",
+      "optimistic estimate"
+    ],
+    "flags": {
+      "has_figure": false,
+      "has_table": true,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.041569
+  },
+  {
+    "node_id": "ai25",
+    "path": [
+      "Ch 9 Learning from Data",
+      "9.1 Decision Trees and Information Gain"
+    ],
+    "source_file": "ai_l10_learning.pdf",
+    "page_span": [
+      1,
+      9
+    ],
+    "token_count": 500,
+    "chunk_ids": [
+      "chunk_ai25_a",
+      "chunk_ai25_b",
+      "chunk_ai25_c"
+    ],
+    "key_terms": [
+      "decision tree",
+      "information gain",
+      "entropy",
+      "attribute test",
+      "overfitting",
+      "pruning",
+      "training set",
+      "hypothesis space",
+      "supervised learning",
+      "generalisation"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": true,
+      "has_equation": false,
+      "has_code": false
+    },
+    "instructional_mass": 0.039216
+  },
+  {
+    "node_id": "ai26",
+    "path": [
+      "Ch 9 Learning from Data",
+      "9.2 Neural Networks and Backpropagation"
+    ],
+    "source_file": "ai_l10_learning.pdf",
+    "page_span": [
+      10,
+      20
+    ],
+    "token_count": 560,
+    "chunk_ids": [
+      "chunk_ai26_a",
+      "chunk_ai26_b",
+      "chunk_ai26_c",
+      "chunk_ai26_d"
+    ],
+    "key_terms": [
+      "neural network",
+      "backpropagation",
+      "activation function",
+      "gradient descent",
+      "hidden layer",
+      "weight update",
+      "perceptron",
+      "loss function",
+      "learning rate",
+      "deep network"
+    ],
+    "flags": {
+      "has_figure": true,
+      "has_table": false,
+      "has_equation": true,
+      "has_code": false
+    },
+    "instructional_mass": 0.043922
+  }
+]

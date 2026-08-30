@@ -829,3 +829,40 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] Browser end-to-end gate: upload → ingest → generate → download → chat.
 - [ ] Integration test: network killed mid-generation → degraded JSON shown in browser.
 - [ ] Fix `@app.on_event("startup")` deprecation to `lifespan` pattern.
+
+---
+
+## Spec Amendment 01 — stage 4 (the AI blueprint)  [COMPLETE 2026-08-30 — amendment finished]
+
+- [x] `coursegen/exam/blueprints/ai_fundamentals_v1.json` authored in the shipped `Blueprint`
+      shape — translated, not adapted. No loader, no second format.
+- [x] AI-shaped course-map fixture; 17 tests. Against AI material all 20 slots fill and every
+      topic matches; against a generic CS map the paper is visibly incomplete and names what it
+      could not cover.
+- [x] **`cognitive_balance` now weighted by MARKS, not item count.** The first real blueprint
+      is exactly on target by marks and read 30 points adrift by count, firing a spurious
+      warning. A false alarm costs as much as a miss on the one signal that catches real drift.
+
+### Needs the human to confirm — four calls the source blueprint did not specify
+
+- [ ] **`grounding` per task.** q2 / q3 / q4 read as synthesis ("generate a novel game tree",
+      "generate a novel word problem", "define a state-space environment"). That is **8 of 20
+      items and 70 of 100 marks not answerable from the student's own slides**, so the manifest
+      warning fires at 40%. Correct for a trace question; worth confirming for q4, whose MDP
+      formulation could plausibly be drawn from the material instead of invented.
+- [ ] **`duration_minutes: 180`** — inferred from `final_default`'s convention.
+- [ ] **`item_type` per format** — `TRUE_FALSE_SERIES` → 2-option mcq (keeps gate 4 live);
+      modelling formats → long; analytical → short.
+- [ ] **Compound Bloom labels** (`REMEMBER_UNDERSTAND`) carried through unchanged rather than
+      mapped to the lowercase scheme, so they match `cognitive_balance`'s keys.
+
+### The real test has not happened yet
+
+- [ ] **Match the five topic strings against a REAL lecture deck.** Everything above is against
+      fixtures. If the deck's headings read "Lecture 4" or "Week 6 — Games" rather than
+      "Adversarial Search", the topics will match nothing — which the report will say loudly,
+      but which means the blueprint's topic strings need to be written against the actual
+      material.
+- [ ] **Calibrate `TOPIC_MATCH_RELATIVE_FLOOR` and `TOPIC_MATCH_MIN_EVIDENCE`** on that deck.
+      Both ship uncalibrated and were deliberately not tuned against fixtures.
+- [ ] **Generate one exam with a real model.** No live call has ever been made.

@@ -74,6 +74,12 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
     It cannot be a parse-time validator because the realised mix is an allocation outcome.
     This is the only signal that would catch a paper drifting to easy recall questions while the
     blueprint asked for 70% apply/analyse — every other metric would call that paper fine.
+    **The realised share is weighted by MARKS, not counted by item** (fixed at stage 4). A
+    Table of Specifications states its Bloom distribution by weight, and a 20-mark trace
+    question does not carry the cognitive weight of a 2-mark true/false. Counting items made
+    `ai_fundamentals_v1` — which is exactly on target by marks — read 30 points adrift on two
+    levels and fire a spurious warning. A false alarm costs as much as a miss here: one
+    wrongful firing teaches everyone to ignore the only signal that catches real drift.
 - **Authored-blueprint generation control (Amendment 01 stage 3):** the solver also carries
   `grounding` and `generation_instructions` from `SectionSpec` to every `ItemSpec` it emits, and
   both join `spec_hash` on the rules above. Neither changes how a slot is *allocated* — they

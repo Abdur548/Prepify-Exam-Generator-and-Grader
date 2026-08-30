@@ -1,0 +1,96 @@
+{
+  "blueprint_id": "template_ai_fundamentals_v1",
+  "title": "Artificial Intelligence",
+  "total_marks": 100,
+  "duration_minutes": 180,
+  "cognitive_balance": {
+    "REMEMBER_UNDERSTAND": 0.2,
+    "APPLY_ANALYZE": 0.7,
+    "EVALUATE": 0.1
+  },
+  "_reviewer_calls": {
+    "_what_this_is": "JSON carries no comments, and four fields below are NOT in the human's source blueprint — they are reviewer calls made to translate that source into the shape `Blueprint` parses. Recorded here, beside the fields themselves, and flagged in todo.md for the human to confirm or override. Ignored by the parser (pydantic drops unknown keys); it is documentation, not contract.",
+    "duration_minutes": "NOT IN SOURCE. 180 minutes chosen to match the house convention: final_default.json is also 100 marks / 180 minutes. Confirm.",
+    "item_type": "NOT IN SOURCE, and load-bearing — `item_type` decides which validation gates apply. TRUE_FALSE_SERIES -> mcq with options_count 2, so gate 4 (MCQ hygiene) still applies and passes: 'True'/'False' sit inside the +/-40% OPTION_LENGTH_BAND and neither is an 'all of the above'. ALGORITHMIC_TRACE_PROBLEM / SCENARIO_MODELING_AND_SOLVING / MATHEMATICAL_MODELING -> long. ANALYTICAL_SHORT_ANSWER -> short. Confirm.",
+    "grounding": "NOT IN SOURCE, and it decides whether gate 2 runs at all. Read from each task's own instructions: q1 'testing theoretical properties' -> span; q2 'Generate a novel adversarial game tree' -> synthesis; q3 'Generate a novel word problem' -> synthesis; q4 'Define a state-space environment' -> synthesis; q5 'Present the mathematical update rules' (the rules come from the material) -> span. That is 8 of 20 items synthesis = 40%, above SYNTHESIS_ITEM_WARN_RATIO = 0.25, so the manifest WILL warn on this blueprint. That is correct behaviour and must not be silenced: nearly half this paper is not answerable from the student's own slides, and saying so out loud is the whole point of stage 3. Confirm.",
+    "bloom": "NOT A TRANSLATION. The source's compound labels (REMEMBER_UNDERSTAND, APPLY_ANALYZE, EVALUATE) are carried through unchanged rather than mapped onto the lowercase single-level scheme the three shipped blueprints use. `bloom` is list[str] with no fixed vocabulary, and the realised distribution must use the SAME labels as `cognitive_balance` or the declared-vs-realised comparison in CoverageReport compares nothing. Confirm.",
+    "known_consequence": "cognitive_balance is a MARKS mix in the source (20/70/10 of 100 marks) but CoverageReport.bloom_realised is an ITEMS mix (10/8/2 of 20 items = 0.50/0.40/0.10). The two can never agree for this blueprint, so a fully-filled paper still raises two COGNITIVE_BALANCE_TOLERANCE warnings. Not a bug in either field; recorded in todo.md for the human to decide."
+  },
+  "sections": [
+    {
+      "section_id": "A",
+      "title": "True/False: Search Algorithms",
+      "item_type": "mcq",
+      "count": 10,
+      "marks_each": 2,
+      "bloom": ["REMEMBER_UNDERSTAND"],
+      "options_count": 2,
+      "requires_flags_any": null,
+      "topic": "Uninformed and Informed Search (BFS, DFS, A*, Heuristics)",
+      "format_requirement": "TRUE_FALSE_SERIES",
+      "group_id": "q1_search",
+      "grounding": "span",
+      "generation_instructions": "Generate 10 True/False statements testing theoretical properties of search algorithms, such as admissibility, optimality, and node expansion comparisons."
+    },
+    {
+      "section_id": "B",
+      "title": "Alpha-Beta Pruning Trace",
+      "item_type": "long",
+      "count": 1,
+      "marks_each": 20,
+      "bloom": ["APPLY_ANALYZE"],
+      "options_count": null,
+      "requires_flags_any": null,
+      "topic": "Adversarial Search and Minimax with Alpha-Beta Pruning",
+      "format_requirement": "ALGORITHMIC_TRACE_PROBLEM",
+      "group_id": "q2_adversarial_search",
+      "grounding": "synthesis",
+      "generation_instructions": "Generate a novel adversarial game tree graph with terminal leaf values. Ask the student to trace the Alpha-Beta pruning algorithm, explicitly requiring them to show pruned branches and propagated node values."
+    },
+    {
+      "section_id": "C",
+      "title": "Constraint Satisfaction Modelling",
+      "item_type": "long",
+      "count": 4,
+      "marks_each": 5,
+      "bloom": ["APPLY_ANALYZE"],
+      "options_count": null,
+      "requires_flags_any": null,
+      "topic": "Constraint Satisfaction Problems",
+      "format_requirement": "SCENARIO_MODELING_AND_SOLVING",
+      "group_id": "q3_csp",
+      "grounding": "synthesis",
+      "generation_instructions": "Generate a novel word problem with entities and constraints. Sub-questions must require: 1) Defining variables and initial domains. 2) Applying MRV heuristic. 3) Executing a two-pass domain pruning and assignment algorithm."
+    },
+    {
+      "section_id": "D",
+      "title": "Markov Decision Process Modelling",
+      "item_type": "long",
+      "count": 3,
+      "marks_each": 10,
+      "bloom": ["APPLY_ANALYZE"],
+      "options_count": null,
+      "requires_flags_any": null,
+      "topic": "Markov Decision Processes",
+      "format_requirement": "MATHEMATICAL_MODELING",
+      "group_id": "q4_mdp",
+      "grounding": "synthesis",
+      "generation_instructions": "Define a state-space environment with transition models and rewards. Sub-questions must require: 1) Formulating Bellman equations. 2) Executing manual policy extraction/value iteration for specific states. 3) Evaluating the optimality of a given mock policy."
+    },
+    {
+      "section_id": "E",
+      "title": "Reinforcement Learning Comparison",
+      "item_type": "short",
+      "count": 2,
+      "marks_each": 5,
+      "bloom": ["EVALUATE"],
+      "options_count": null,
+      "requires_flags_any": null,
+      "topic": "Reinforcement Learning (Q-Learning vs SARSA)",
+      "format_requirement": "ANALYTICAL_SHORT_ANSWER",
+      "group_id": "q5_reinforcement_learning",
+      "grounding": "span",
+      "generation_instructions": "Present the mathematical update rules for two RL algorithms (e.g., Q-learning and SARSA). Ask the student to evaluate and compare their convergence properties under a specific exploratory policy scenario."
+    }
+  ]
+}
