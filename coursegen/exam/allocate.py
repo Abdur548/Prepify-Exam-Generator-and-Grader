@@ -99,6 +99,12 @@ def solve(
         slots_by_mass=all_by_mass,
         slots_by_fallthrough=all_by_fallthrough,
         per_topic=all_per_topic,
+        # The REALISED Bloom mix is measured from the items actually emitted and
+        # compared against the blueprint's declared target. It cannot be a
+        # Blueprint validator: how many slots each section fills is an allocation
+        # outcome, unknown at parse time. A None target means no comparison.
+        items=all_items,
+        cognitive_balance=blueprint.cognitive_balance,
     )
     return all_items, report
 
@@ -274,13 +280,13 @@ def _solve_section(
     # This is a documented heuristic, not a pedagogical guarantee.
     assignments.sort(key=lambda a: (a[0].token_count, a[0].node_id))
 
-    # Build ItemSpec list with deterministic slot IDs and bloom cycling.
+    # Build ItemSpec list with deterministic slot IDs and per-slot bloom levels.
     items: list[ItemSpec] = []
-    bloom_list = section.bloom
+    bloom_by_slot = _bloom_ladder(section, filled)
 
     for idx, (node, spans) in enumerate(assignments):
         slot_id = f"{section.section_id}-{idx + 1:02d}"
-        bloom = bloom_list[idx % len(bloom_list)]
+        bloom = bloom_by_slot[idx]
         eligibility = [
             flag for flag in (section.requires_flags_any or [])
             if getattr(node.flags, flag, False)
@@ -293,6 +299,11 @@ def _solve_section(
             node_id=node.node_id,
             span_ids=spans,
             eligibility=eligibility,
+            format_requirement=section.format_requirement,
+            # Carried through unchanged: the N items a sub-questioned task
+            # expands into share the section's group_id, and the renderer will
+            # later group them under one question number.
+            group_id=section.group_id,
             spec_hash=_spec_hash(
                 node.node_id,
                 spans,
@@ -300,6 +311,7 @@ def _solve_section(
                 bloom,
                 section.marks_each,
                 section.options_count,
+                section.format_requirement,
             ),
         )
         items.append(spec)
@@ -307,6 +319,61 @@ def _solve_section(
         node_marks_map[node.node_id] += section.marks_each
 
     return items, warnings, unfilled, by_mass, by_fallthrough, _topic_row(filled)
+
+
+def _bloom_ladder(section: SectionSpec, filled: int) -> list[str]:
+    """Bloom level for each filled slot, in slot order.
+
+    Without `bloom_mix` this is EXACTLY the round-robin that shipped before the
+    field existed — `section.bloom[idx % len(section.bloom)]`. Absence means
+    current behaviour, and that is the regression guard for the three shipped
+    blueprints, none of which authors a mix.
+
+    With `bloom_mix` the proportions are apportioned to integer counts by the
+    SAME `_hare_apportionment` the solver uses for nodes. Reusing it — rather
+    than writing a second apportionment — keeps the tie-breaking rule identical
+    and the result deterministic. One inherited consequence worth stating: that
+    function breaks ties on ASCENDING KEY, so two levels holding equal
+    proportions are separated alphabetically by level name, not by their order
+    in `section.bloom`.
+
+    ORDER — the levels are emitted GROUPED, in `section.bloom` order: every slot
+    of the first-listed level, then every slot of the second, and so on. Two
+    reasons. `section.bloom` is the authored order, so the result does not depend
+    on the JSON key order of `bloom_mix`. And `assignments` has already been
+    sorted ascending by token_count (the difficulty ladder), so a blueprint that
+    lists its levels ascending — as all three shipped ones do — gets its Bloom
+    ladder running the same way as its length ladder.
+
+    Apportionment is over `section.count`, per the amendment, NOT over the number
+    of slots that actually filled. When a section fills short it is the TAIL of
+    the ladder that goes missing: the first `filled` levels are used and the rest
+    dropped. A short section has already failed its declared mix — the
+    cognitive_balance comparison in the CoverageReport is what reports that, and
+    it warns rather than raising.
+    """
+    if section.bloom_mix is None:
+        return [section.bloom[i % len(section.bloom)] for i in range(filled)]
+
+    counts = _hare_apportionment(dict(section.bloom_mix), section.count)
+    # Keys are a subset of section.bloom (SectionSpec validates that), so every
+    # apportioned slot lands in the ladder and unlisted levels contribute zero.
+    ladder = [
+        level for level in section.bloom for _ in range(counts.get(level, 0))
+    ]
+    # Structural postcondition, not a taste check: apportionment must place
+    # exactly `count` slots. A shorter ladder would silently hand later slots the
+    # wrong level (or IndexError); a longer one would drop levels the mix asked
+    # for. Either way the paper would look like the blueprint was honoured.
+    # Raised, not asserted — `python -O` strips asserts.
+    if len(ladder) != section.count:
+        raise ValueError(
+            f"Section {section.section_id!r}: bloom_mix {section.bloom_mix!r} "
+            f"apportioned to {len(ladder)} slots for a section of "
+            f"{section.count}. Proportions must be non-negative and describe a "
+            f"usable mix."
+        )
+    return ladder[:filled]
 
 
 def _pick_node(
@@ -439,6 +506,7 @@ def _spec_hash(
     bloom: str,
     marks: int,
     options_count: Optional[int],
+    format_requirement: Optional[str] = None,
 ) -> str:
     """LLM generation cache key.
 
@@ -447,13 +515,26 @@ def _spec_hash(
     (midterm) and a 5-mark short question (final) can be drawn from the same
     node + span + bloom. Span-uniqueness only protects within a single paper.
     options_count is rendered as "" when None, so the encoding is stable.
+
+    format_requirement JOINS the key (§8.1) because it changes the prompt: two
+    items differing only in format are different questions and must not share a
+    cached generation. It is APPENDED ONLY WHEN SET, rather than encoded as ""
+    like options_count, so a section that authors no format produces byte-
+    identical hashes to before this field existed — the three shipped blueprints
+    keep their cache entries and their ItemSpec[] unchanged.
+
+    group_id is deliberately absent: it is presentational, changing how items are
+    displayed rather than what is asked, so regrouping must not invalidate the
+    cache.
     """
-    raw = "|".join([
+    parts = [
         node_id,
         ",".join(span_ids),
         item_type,
         bloom,
         str(marks),
         "" if options_count is None else str(options_count),
-    ])
-    return hashlib.sha256(raw.encode()).hexdigest()
+    ]
+    if format_requirement is not None:
+        parts.append(format_requirement)
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()

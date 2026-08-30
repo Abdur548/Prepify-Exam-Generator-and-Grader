@@ -212,6 +212,42 @@ TOPIC_MATCH_MIN_TOKEN_LEN: int = 3
 TOPIC_MATCH_MIN_SCORE: float = 0.3
 
 # ---------------------------------------------------------------------------
+# Authored blueprint structure (Spec Amendment 01, stage 2)
+# ---------------------------------------------------------------------------
+# §8.1: the new question formats do NOT widen `item_type`. `item_type` stays
+# mcq|short|long because it drives renderer layout AND which validation gates
+# apply — gate 4 (MCQ hygiene) keys off `item_type == "mcq"`. A true/false item is
+# therefore item_type="mcq", options_count=2, format_requirement="TRUE_FALSE_SERIES":
+# hygiene still applies, and the prompt gets the finer instruction.
+#
+# A SET, deliberately NOT a typing.Literal: adding a format is then a data change
+# in this file rather than a code change in the contract. `SectionSpec` validates
+# against it and RAISES on an unknown value — a typo'd format that fell through
+# would generate a generic question under a blueprint that looked honoured, which
+# is exactly the plausible-but-wrong artifact this project keeps producing.
+KNOWN_FORMAT_REQUIREMENTS: frozenset[str] = frozenset({
+    "TRUE_FALSE_SERIES",
+    "ALGORITHMIC_TRACE_PROBLEM",
+    "SCENARIO_MODELING_AND_SOLVING",
+    "MATHEMATICAL_MODELING",
+    "ANALYTICAL_SHORT_ANSWER",
+})
+
+# UNIT: absolute difference between two proportions, each in [0, 1] — so 0.10 is
+# ten percentage points, NOT ten percent of the target.
+#
+# A blueprint may declare `cognitive_balance`, the exam-level Bloom mix its tasks
+# are meant to sum to. The REALISED mix is not knowable at parse time — it depends
+# on how many slots each section actually filled — so it is compared in the
+# CoverageReport and divergence beyond this is a WARNING, never a raise: an
+# under-filled paper legitimately misses its target, and that is information.
+#
+# A STARTING VALUE, not a measured one. Nothing has been calibrated against real
+# papers yet; it was picked so that a one-question wobble on a 20-question section
+# does not cry wolf while a paper drifting from 70% apply/analyse to 40% does.
+COGNITIVE_BALANCE_TOLERANCE: float = 0.10
+
+# ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
 CHAT_MAX_TURNS: int = 6              # L6: older turns dropped, never summarised

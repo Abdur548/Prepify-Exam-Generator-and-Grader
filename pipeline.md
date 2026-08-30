@@ -39,9 +39,36 @@ CourseMapNode[] + Blueprint → Allocation Solver → ItemSpec[] + CoverageRepor
 - **Difficulty ladder:** ascending `token_count` within a section. This is a **documented
   heuristic, not a pedagogical guarantee** — a longer section is not reliably a harder one.
 - **Cache key:** `ItemSpec.spec_hash` = sha256 over `node_id`, `span_ids`, `item_type`, `bloom`,
-  `marks`, `options_count`. `marks` and `options_count` are in the key because the generation
-  cache only pays off *across* papers, which is exactly where a 4-mark midterm question and a
-  5-mark final question drawn from the same node and span would otherwise collide.
+  `marks`, `options_count`, and `format_requirement` **when set**. `marks` and `options_count`
+  are in the key because the generation cache only pays off *across* papers, which is exactly
+  where a 4-mark midterm question and a 5-mark final question drawn from the same node and span
+  would otherwise collide. `format_requirement` joins it because it changes the prompt.
+  It is **appended only when present**, rather than encoded as `""` the way `options_count` is:
+  encoding `None` as an empty field would add a trailing separator and change every hash in the
+  product, silently invalidating the on-disk generation cache for all three shipped blueprints.
+  `group_id` is deliberately **excluded** — it is presentational, so regrouping items under a
+  question number must not invalidate a cached generation of the same question.
+- **Authored-blueprint structure (Amendment 01 stage 2):**
+  - `format_requirement` — the finer generation-facing format (`TRUE_FALSE_SERIES`,
+    `ALGORITHMIC_TRACE_PROBLEM`, …), kept separate from `item_type` because `item_type` decides
+    which validation gates apply: gate 4 (MCQ hygiene) keys off `item_type == "mcq"`. Validated
+    against `config.KNOWN_FORMAT_REQUIREMENTS` and **raises** on an unknown value — a typo that
+    fell through to a generic question would leave the blueprint looking honoured while quietly
+    not being.
+  - `group_id` — sub-questions expand into N `ItemSpec`s sharing an id, rather than one nested
+    composite, because one-spec-per-item underpins span uniqueness, the cache, and all four
+    gates.
+  - `bloom_mix` — proportional Bloom within a section, apportioned by the same largest-remainder
+    function used for nodes. Absent, the previous even round-robin applies. Levels are assigned
+    **grouped, in `section.bloom` order**, so the result does not depend on JSON key order.
+    Note the inherited tie-break: two levels with equal proportions are separated
+    alphabetically by level name, not by `section.bloom` order.
+  - `cognitive_balance` — an exam-level *declared* target. `CoverageReport` carries the
+    **realised** distribution beside it and warns past `COGNITIVE_BALANCE_TOLERANCE`. A warning,
+    never a raise: an under-filled paper legitimately misses its target, and that is information.
+    It cannot be a parse-time validator because the realised mix is an allocation outcome.
+    This is the only signal that would catch a paper drifting to easy recall questions while the
+    blueprint asked for 70% apply/analyse — every other metric would call that paper fine.
 - **Status:** implemented (on fixture; real data in P2)
 
 ### Ingest

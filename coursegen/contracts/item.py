@@ -24,10 +24,27 @@ class ItemSpec(BaseModel):
     node_id: str
     span_ids: list[str]   # 1 for mcq/short, 1-2 for long
     eligibility: list[str]
-    # sha256(node_id + span_ids + item_type + bloom + marks + options_count) — cache key.
+    # Carried through from SectionSpec, already validated against
+    # config.KNOWN_FORMAT_REQUIREMENTS there. None on every item the three shipped
+    # blueprints produce.
+    format_requirement: Optional[str] = None
+    # Shared by the N items a single sub-questioned task expands into (§8.2). The
+    # renderer will later group items carrying the same group_id under one
+    # question number; nothing renders it yet.
+    group_id: Optional[str] = None
+    # sha256(node_id + span_ids + item_type + bloom + marks + options_count
+    #        [+ format_requirement, appended only when it is set]) — cache key.
     # marks and options_count are in the hash because the cache is shared across papers:
     # a 4-mark short question (midterm) and a 5-mark short question (final) can be drawn
     # from the same node+span+bloom, and must not collide.
+    #
+    # format_requirement JOINS the hash because it changes the prompt: two items
+    # differing only in format are different questions and must not share a
+    # cached generation.
+    #
+    # group_id is deliberately NOT in the hash. It is PRESENTATIONAL — it changes
+    # how items are DISPLAYED, not what is asked — so regrouping sub-questions
+    # must not invalidate cached generations.
     spec_hash: str
 
 

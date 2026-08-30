@@ -611,6 +611,44 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
+## Spec Amendment 01 — stage 2 (authored structure)  [SHIPPED 2026-08-29]
+
+- [x] `format_requirement` on `SectionSpec` / `ItemSpec`, validated against
+      `config.KNOWN_FORMAT_REQUIREMENTS`, **raising** on an unknown value. Joins `spec_hash`
+      **only when set** — encoding `None` as `""` would have added a trailing separator and
+      silently invalidated the generation cache for all three shipped blueprints.
+- [x] `group_id` on both — sub-questions expand into N specs, not one nested composite.
+      Deliberately **excluded** from `spec_hash`: presentational, so regrouping must not
+      invalidate a cached generation.
+- [x] `bloom_mix` — proportional Bloom within a section, via the existing `_hare_apportionment`.
+      Absent ⇒ previous even round-robin. Levels assigned grouped, in `section.bloom` order.
+- [x] `cognitive_balance` — declared exam-level target; `CoverageReport` carries the realised
+      distribution beside it and warns past `COGNITIVE_BALANCE_TOLERANCE = 0.10`. Warning, never
+      a raise. **This is the only signal that would catch a paper drifting to easy recall
+      questions while the blueprint asked for 70% apply/analyse.**
+- [x] 54 new tests; 314 pass; 12/12 mutations caught; shipped blueprints byte-identical,
+      verified against a `git archive` of `53b9392` in a separate process.
+
+### Open, recorded not resolved
+
+- [ ] **`bloom_mix` value policy.** `{0.6, 0.4}` and `{6, 4}` behave identically; an **all-zero**
+      mix falls into `_hare_apportionment`'s zero-mass branch and splits evenly — it fails
+      quietly rather than loudly, which is the wrong direction for this codebase. Decide whether
+      to require sum-to-1.0, reject non-positive values, or accept the current behaviour.
+- [ ] **`group_id` reaches the LLM prompt** via `spec.model_dump()`, so prompt text can vary
+      while `spec_hash` does not. Harmless today — the question asked is the same — but **stage 3
+      owns prompt construction and should decide whether to exclude it.**
+- [ ] **`cognitive_balance` has no parse-time validation**, not even sum-to-1.0. A declared
+      target summing to 1.3 is arguably malformed on its face.
+- [ ] **Short-fill trade-off:** with a grouped Bloom order, a section filling 5 of 10 slots at
+      60/40 emits only the first level. Interleaving would degrade more gracefully but changes
+      the documented order. The `cognitive_balance` warning surfaces it either way.
+- [ ] **`format_requirement` is validated on `SectionSpec` only**, not on `ItemSpec`. Fine while
+      the blueprint is the only entry point; a later stage constructing specs from another source
+      would not be covered.
+
+---
+
 ## Discovered mid-phase (do NOT do now)
 
 - `coursegen/contracts/course_map.py` imports `Field` from pydantic without using it. Harmless;

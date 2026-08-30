@@ -1707,3 +1707,74 @@ $ python -m pytest
 260 passed, 3 warnings in 14.14s
 ```
 **Result:** PASS (P5 stays PARTIAL — browser end-to-end still pending pipeline wiring)
+
+---
+
+## Spec Amendment 01 — stage 2 (authored structure)
+
+**Date:** 2026-08-29 · **Scope:** contracts + allocation only, zero LLM calls. 260 → 314 tests.
+
+**Built:**
+- `format_requirement` on `SectionSpec` / `ItemSpec`, validated against
+  `config.KNOWN_FORMAT_REQUIREMENTS`, **raising** on an unknown value. Kept separate from
+  `item_type` because `item_type` decides which validation gates apply — gate 4 keys off
+  `item_type == "mcq"`.
+- `group_id` on both, so sub-questions expand into N specs rather than one nested composite.
+- `bloom_mix` — proportional Bloom within a section, apportioned by the existing
+  `_hare_apportionment`. Absent, the previous even round-robin applies.
+- `cognitive_balance` — declared exam-level target; `CoverageReport` now carries the
+  **realised** distribution beside it and warns past `COGNITIVE_BALANCE_TOLERANCE = 0.10`.
+
+**Deviations from spec:** none.
+
+**The detail that mattered most.** `format_requirement` is appended to `spec_hash` **only when
+set**, not encoded as `""` the way `options_count` is. Encoding `None` as an empty field would
+have added a trailing separator and changed *every* hash in the product — silently invalidating
+the on-disk generation cache for all three shipped blueprints, with nothing failing to say so.
+That trap was one of the twelve mutations checked.
+
+**Backward compatibility, verified independently of the implementing agent.** `53b9392` was
+exported with `git archive`, both solvers run in separate processes each asserting
+`coursegen` resolved to its own tree, and the pre-existing `ItemSpec` fields diffed:
+
+```
+md5 old: 70f8262ec8e5e4e005e19b99a9e95d9d   (13644 bytes)
+md5 new: 70f8262ec8e5e4e005e19b99a9e95d9d   (13644 bytes)
+RESULT: pre-existing ItemSpec fields BYTE-IDENTICAL (spec_hash included)
+```
+
+*(First run of this check silently failed: the tree-identity assertion compared a
+forward-slash path against a Windows `__file__`, so the old-tree dump was empty and the
+"difference" was an artifact of the harness, not the code. Re-run with normalised paths. Same
+class of mistake as the vacuous mutation test the day before — a verification that does not run
+reports whatever you hoped for.)*
+
+**Mutation results:** 12/12 caught, each asserting the mutation actually applied before
+trusting the result. Includes the trailing-separator trap above, `group_id` wrongly joining
+`spec_hash`, `bloom_mix` ignored, and the balance check never warning.
+
+**Existing tests modified:** none. All 260 pass unmodified.
+
+**Gate command:**
+```
+$ python -m pytest
+314 passed, 3 warnings in 12.39s
+
+$ python -m coursegen --dry-run
+=== No network calls were made ===   (exit 0)
+```
+**Result:** PASS
+
+**Known issues carried forward (recorded by the implementing agent, not resolved):**
+- `bloom_mix` value policy unspecified — `{0.6, 0.4}` and `{6, 4}` behave identically; an
+  all-zero mix falls into the existing zero-mass branch and splits evenly, i.e. fails quietly
+  rather than loudly. Pinned in a test as recorded-not-endorsed.
+- `group_id` reaches the LLM prompt via `spec.model_dump()`, so prompt text can vary while
+  `spec_hash` does not. Harmless — the question asked is the same — but stage 3 owns prompt
+  construction and should decide whether to exclude it.
+- `cognitive_balance` has no parse-time validation at all, not even sum-to-1.0. A declared
+  target summing to 1.3 is arguably malformed on its face; not specified, so not invented.
+- Short-fill trade-off: with a grouped Bloom order, a section filling 5 of 10 slots at 60/40
+  emits only the first level. The `cognitive_balance` warning is what surfaces it.
+- The tolerance boundary is not assertable — 0.10 is not representable in binary float, so no
+  fixture can distinguish `>` from `>=`.

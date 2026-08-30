@@ -5,8 +5,10 @@ from collections import defaultdict
 
 from typing import Optional
 
+from coursegen import config
 from coursegen.contracts.course_map import CourseMapNode
 from coursegen.contracts.coverage import CoverageReport, NodeCoverage, TopicCoverage
+from coursegen.contracts.item import ItemSpec
 
 
 def build_report(
@@ -20,6 +22,8 @@ def build_report(
     slots_by_mass: int,
     slots_by_fallthrough: int,
     per_topic: Optional[list[TopicCoverage]] = None,
+    items: Optional[list[ItemSpec]] = None,
+    cognitive_balance: Optional[dict[str, float]] = None,
 ) -> CoverageReport:
     covered_ids = set(node_slot_map.keys())
     nodes_total = len(course_map)
@@ -65,6 +69,11 @@ def build_report(
         for n in sorted(course_map, key=lambda n: n.node_id)
     ]
 
+    bloom_realised = _bloom_realised(items)
+    all_warnings = list(warnings) + _cognitive_balance_warnings(
+        declared=cognitive_balance, realised=bloom_realised
+    )
+
     return CoverageReport(
         blueprint_id=blueprint_id,
         nodes_total=nodes_total,
@@ -81,6 +90,61 @@ def build_report(
         # None means "no authored topics in this blueprint" (the derived path),
         # which reports as an empty list — never as a missing field.
         per_topic=[] if per_topic is None else list(per_topic),
+        bloom_realised=bloom_realised,
+        # None means "the blueprint declared no target", which reports as None —
+        # distinct from an empty dict, which would claim a target of nothing.
+        cognitive_balance_declared=(
+            None if cognitive_balance is None else dict(cognitive_balance)
+        ),
         unfilled_slots=unfilled_slots,
-        warnings=warnings,
+        warnings=all_warnings,
     )
+
+
+def _bloom_realised(items: Optional[list[ItemSpec]]) -> dict[str, float]:
+    """Bloom level → fraction of the EMITTED items carrying it.
+
+    Empty when nothing was emitted: a paper with no items has no realised
+    distribution, and inventing one (or dividing by zero) would be worse than
+    saying nothing. Keys are sorted so the report is byte-stable.
+    """
+    if not items:
+        return {}
+    counts: dict[str, int] = defaultdict(int)
+    for item in items:
+        counts[item.bloom] += 1
+    total = len(items)
+    return {level: counts[level] / total for level in sorted(counts)}
+
+
+def _cognitive_balance_warnings(
+    declared: Optional[dict[str, float]],
+    realised: dict[str, float],
+) -> list[str]:
+    """Compare the blueprint's declared Bloom target against what was emitted.
+
+    A WARNING, never a raise. The realised distribution is an allocation
+    OUTCOME — a section that filled short cannot hit its declared share, and an
+    under-filled paper missing its target is information, not a crash. This is
+    also why the check cannot live on the Blueprint as a pydantic validator:
+    nothing at parse time knows how many slots will fill.
+
+    Levels are taken from the UNION of both sides, not just the declared keys. A
+    level the target never mentions still counts against it — that is exactly how
+    a paper drifts to easy recall questions the blueprint never asked for, and
+    iterating only the declared keys would look straight past it. A level absent
+    from either side contributes 0.0 on that side.
+    """
+    if declared is None:
+        return []
+    return [
+        (
+            f"Cognitive balance for {level!r}: declared {declared.get(level, 0.0):.2f}, "
+            f"realised {realised.get(level, 0.0):.2f} — divergence "
+            f"{abs(realised.get(level, 0.0) - declared.get(level, 0.0)):.2f} exceeds "
+            f"COGNITIVE_BALANCE_TOLERANCE={config.COGNITIVE_BALANCE_TOLERANCE}."
+        )
+        for level in sorted(set(declared) | set(realised))
+        if abs(realised.get(level, 0.0) - declared.get(level, 0.0))
+        > config.COGNITIVE_BALANCE_TOLERANCE
+    ]

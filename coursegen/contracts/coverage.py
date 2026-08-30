@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -66,5 +68,23 @@ class CoverageReport(BaseModel):
     # One row per section carrying an authored `topic`, in blueprint order.
     # EMPTY for topic-free (derived) blueprints — the three shipped ones included.
     per_topic: list[TopicCoverage] = Field(default_factory=list)
+    # REALISED Bloom distribution over the items actually EMITTED — level →
+    # fraction of emitted items, summing to 1.0 (empty when nothing was emitted).
+    #
+    # Over emitted items rather than requested slots, deliberately: an
+    # under-filled paper's realised mix is the mix of the questions the student
+    # actually sits, and that is the thing worth comparing against a target.
+    bloom_realised: dict[str, float] = Field(default_factory=dict)
+    # The blueprint's DECLARED cognitive_balance, when it gave one; None otherwise.
+    # Carried beside the realised mix so the two are read together — a realised
+    # number with no target next to it cannot be judged.
+    #
+    # Divergence beyond config.COGNITIVE_BALANCE_TOLERANCE appends a WARNING
+    # naming both, and never raises: an under-filled paper legitimately misses its
+    # target, and that is information rather than a crash. This pair is the only
+    # thing that would notice a paper drifting to easy recall questions while the
+    # blueprint asked for 70% apply/analyse — a silent quality failure that
+    # coverage_ratio, fill_ratio and allocation_fidelity would all report as fine.
+    cognitive_balance_declared: Optional[dict[str, float]] = None
     unfilled_slots: list[str]
     warnings: list[str]
