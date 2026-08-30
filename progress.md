@@ -13,6 +13,7 @@
 | P4 | Render + chat | PARTIAL | `pytest tests/test_p4_render_chat.py -v` PASS; real `import weasyprint` FAILED | 2026-08-28 |
 | P1 | Ingest fixes — `.ppt`, `.docx`, chunk page precision | PASS | `python -m pytest` (211) + `python -m coursegen --dry-run`; P1 idempotency + point-count gates re-verified | 2026-08-28 |
 | P5 | UI + resilience | PARTIAL | `pytest tests/test_p5_app.py` 14/14 PASS; browser end-to-end gate pending pipeline wiring | 2026-08-30 |
+| A01 | Stage 1 fix — topic→node rule replaced with matched IDF mass | PASS | `python -m pytest` (356) + `python -m coursegen --dry-run`; 3/3 mutations caught; shipped blueprints byte-identical vs `ebc6c1b`. **Unblocks stage 4** | 2026-08-30 |
 | P6 | Evaluation + baseline | NOT STARTED | | |
 | P7 | Hardening + rehearsal | NOT STARTED | | |
 
@@ -1911,3 +1912,216 @@ $ python -m coursegen --dry-run
   about the real prompt. Pre-existing; L10 byte-identity is covered by tests instead.
 - **`SYNTHESIS_ITEM_WARN_RATIO = 0.25` is a starting value, not a measured one**, and is
   commented as such.
+
+---
+
+## Spec Amendment 01 — stage 1 fix (topic→node matching rule replaced)
+
+**Date:** 2026-08-30 · **Scope:** `config.py`, `exam/allocate.py`, `contracts/coverage.py`,
+`tests/test_a01_topic_allocation.py`, the three living documents. Zero LLM calls — pure
+allocation. 350 → 356 tests.
+
+### Why
+
+Stage 1 shipped `score = |topic_tokens ∩ node_tokens| / |topic_tokens|` — the fraction of the
+topic's vocabulary found in a node — and **it punished specificity**. A richer, more precise
+phrasing of the *same* topic scored 3.5× worse than the bare word, because every enumerated term
+the node happened not to contain sat in the denominator and diluted the score. **Every topic in
+`template_ai_fundamentals_v1` is a long parenthetical string of exactly that shape**, so
+essentially none of them would have matched, and stage 4 could not work.
+
+IDF-weighting the same fraction was measured and rejected: `0.286 → 0.262`, slightly **worse**,
+because the enumerated terms are rare and are therefore weighted *up* while unmatched. The
+denominator was the problem, not the weighting.
+
+### The replacement rule
+
+```
+df(t)  = number of course-map nodes whose (path + key_terms) tokens contain t
+idf(t) = ln((N + 1) / (df(t) + 1)) + 1          # N = node count; smoothed, always > 0
+mass(topic, node) = Σ idf(t) for t in (topic_tokens ∩ node_tokens)
+```
+
+No topic-length denominator, so extra enumerated terms can only **add** evidence. Tokenisation
+is unchanged. Admission takes two conditions and needs both:
+
+```
+best = max mass over the section's candidate nodes    (the flag survivors)
+if best <= 0:                       no match at all
+admit node  iff  mass(node) >= TOPIC_MATCH_RELATIVE_FLOOR * best
+            and  best      >= TOPIC_MATCH_MIN_EVIDENCE
+```
+
+`TOPIC_MATCH_MIN_SCORE` is **removed**. `TOPIC_MATCH_RELATIVE_FLOOR = 0.5` and
+`TOPIC_MATCH_MIN_EVIDENCE = 1.5` replace it, both marked **UNCALIBRATED** in the style of
+`GROUNDEDNESS_TAU`. Relative, because raw IDF mass scales with corpus size (`idf` depends on
+`N`) and an absolute-only threshold calibrated on a 20-node fixture would drift on a 200-node
+course; absolute as well, because a purely relative rule always admits the best node however
+weak — `mass >= 0.5 * best` is trivially true for the argmax — and that is the guard against
+"best of a bad lot".
+
+### Measured — old rule vs new, on `tests/fixtures/course_map_sample.json` (N = 20)
+
+| Topic | old best | old admitted | new best | new admitted |
+|---|---|---|---|---|
+| `Search` | 1.000 | 1 — n10 | 3.351 | 1 — n10 |
+| `Uninformed and Informed Search (BFS, DFS, A*, Heuristics)` | 0.286 | **0** | **6.703** | 3 — n03, n10, n11 |
+| `Adversarial Search and Minimax with Alpha-Beta Pruning` | 0.125 | **0** | 3.351 | 2 — n03, n10 |
+| `Constraint Satisfaction Problems` | 0.000 | 0 | 0.000 | 0 |
+| `Markov Decision Processes` | 0.333 | 1 — n16 | 3.351 | 1 — n16 |
+| `Reinforcement Learning (Q-Learning vs SARSA)` | 0.000 | 0 | 0.000 | 0 |
+| `Data Structures` | 1.000 | 6 — n02, n04–n08 | 4.351 | 5 — n04–n08 |
+| `Trees and Graph Traversal (BFS, DFS)` | 0.667 | 2 — n08, n11 | 12.712 | 1 — n11 |
+
+**The headline is row 2.** `"Search"` and the precise phrasing of the same topic used to score
+1.000 and 0.286 — the bare word matched, the precise one matched nothing. They now score 3.351
+and 6.703, in the right order.
+
+**`Constraint Satisfaction Problems` and `Reinforcement Learning (Q-Learning vs SARSA)` score
+zero under both rules, and that is the design working, not a failure.** The fixture is a generic
+CS syllabus with no such content. A topic the uploaded material does not cover must report zero
+and leave its slots unfilled — that is the property option C exists to buy.
+
+Two further readings, both recorded in `todo.md` rather than acted on:
+
+- **`Adversarial Search…` admits `n03` ("1.3 Variables and Scope") on the word "and" alone.**
+  `"and"` is exactly `TOPIC_MATCH_MIN_TOKEN_LEN` characters, so it survives tokenisation, and it
+  occurs in exactly one of twenty headings — so `idf` treats it as **distinctive** and weights it
+  *up* to 3.351, more than twice the evidence floor. Under the old bounded fraction this looked
+  like arithmetic; under IDF the corpus statistics actively reward the junk token. This is
+  Amendment §7's "a topic that half-matches is worse than one that does not match at all",
+  reached through the front door rather than through a fallback.
+- **`Data Structures` now excludes `n02` ("1.2 Data Types") by 0.077** — 2.099 against a floor of
+  2.176. Semantically right; a near-tie, and not evidence that 0.5 is well placed.
+
+Neither constant was tuned against this fixture. It is a generic CS syllabus, not the real AI
+deck, and a number fitted to it would look measured while meaning nothing.
+
+### What did not change
+
+- **`topic = None` is still the derived path.** No matching runs; candidates are the whole course
+  map. The three shipped blueprints (`quiz_default`, `midterm_default`, `final_default`) carry no
+  topics and produce **byte-identical `ItemSpec[]`, `spec_hash` included** — and byte-identical
+  `CoverageReport`s. Verified against a `git archive` of `ebc6c1b` extracted to a separate
+  directory and imported in a separate process, with the editable-install `MetaPathFinder`
+  stripped from `sys.meta_path` first and the imported module's location asserted with
+  `os.path.normcase` — otherwise that finder silently serves the working tree for both halves of
+  the comparison and the result proves nothing:
+
+  | Blueprint | items | `sha256(ItemSpec[])` HEAD == working |
+  |---|---|---|
+  | `quiz_default` | 7 | `41bedce645b61cd08d2449a8a9d5bf29…` ✅ |
+  | `midterm_default` | 22 | `b5836927b73816a7b5e3af068a0663c8…` ✅ |
+  | `final_default` | 32 | `50a1364affc41a87b3d478dd67608a34…` ✅ |
+
+- **No fallback when nothing matches.** `best <= 0`, or `best` below the evidence floor, leaves
+  the section's slots unfilled with a warning naming the topic. The two rejections carry
+  *different* messages — zero overlap and near-miss are different problems with different fixes —
+  and `best <= 0` is kept as its own branch so the rule stays correct if
+  `TOPIC_MATCH_MIN_EVIDENCE` is ever calibrated to `0` (`0 >= 0.5 × 0` would otherwise admit the
+  entire candidate set).
+- **Determinism.** Each node's mass is summed over **sorted** tokens. Floating-point addition is
+  not associative and set iteration order depends on `PYTHONHASHSEED`, so summing straight out of
+  the set could differ in the last bit between processes — enough to move a node across the
+  relative floor in a near-tie.
+
+### Mutations — 3/3 caught, each verified as applied
+
+Every mutation was applied to a **copy** of the working tree; `assert mutated != original` was
+checked against both the in-memory text and the file re-read from disk, and the imported
+`coursegen.__file__` was asserted to live under the mutant root before the result was trusted —
+a replacement that silently fails to match yields a meaningless pass, and that error has been
+made twice on this repo. An unmutated control copy was run first and passed 29/29.
+
+| # | Mutation | Applied | Caught by |
+|---|---|---|---|
+| M1 | Evidence floor removed (`if False:`) — admit however weak the best match | 1 site, file differs | `test_evidence_floor_rejects_a_match_on_a_ubiquitous_term` |
+| M2 | Relative floor removed — admit every node with any overlap at all | 1 site, file differs | `test_relative_floor_excludes_the_weaker_of_two_real_matches`, `test_items_come_only_from_matched_nodes`, `test_within_topic_allocation_is_still_mass_proportional` |
+| M3 | No-match topic falls back to the whole course map (both no-match returns dropped; `mass >= 0.5 × 0` then admits everything) | 2 sites, file differs | `test_no_fallback_to_the_unfiltered_course_map`, `test_no_match_leaves_slots_unfilled_and_says_so`, `test_unmatched_topic_does_not_starve_a_matched_one`, +3 |
+
+M1 is worth noting: **the evidence floor cannot be exercised by the fixture at all.** The
+fixture's most common token is `data` at `df = 6` of 20, worth `idf = 2.099` — above 1.5 — so
+every non-zero overlap in it clears the absolute floor. The guard is tested against a synthetic
+`_uniform_course_map()` in which one term appears in all N nodes and therefore scores exactly
+`1.0`, the floor of the smoothed idf. Building that fixture, rather than lowering the constant
+until the fixture could reach it, is the point.
+
+**Tests changed:** `tests/test_a01_topic_allocation.py` only. Two pinned the removed constant and
+were rewritten; one fixture constant was replaced because it is no longer an absent topic; four
+tests were added. No other test file was touched, and all 327 tests outside this file pass
+unmodified.
+
+**Gate command:**
+```
+$ python -m pytest
+356 passed in 13.83s
+
+$ python -m coursegen --dry-run
+=== No network calls were made ===   (exit 0)
+```
+**Result:** PASS
+
+**Known issues carried forward (recorded, not resolved):**
+- **Both constants are UNCALIBRATED** and must be measured against the real AI course deck.
+  `TOPIC_MATCH_MIN_EVIDENCE` is the more urgent of the two: it never fires on the fixture, so
+  nothing in the suite says whether 1.5 is anywhere near right on a real corpus.
+- **A single 3-letter stopword now carries enough evidence to admit a node.** Escalated in
+  `todo.md` from cosmetic to load-bearing — IDF weights a rare connective *up* rather than
+  diluting it.
+- **`best_score` still reports 0.0 for a near-miss.** The replacement rule computes `best`
+  explicitly before admission and the rejection warning prints it, so reporting it in the field
+  is now a one-line change — deliberately not made, because it changes the field's specified
+  meaning and the brief was to change its *scale*.
+- **Solve order still keys only on `requires_flags_any`.** Unchanged from stage 1; a
+  topic-restricted section is at least as constrained as a flag-restricted one.
+
+### Reviewer corrections on the matching-rule fix (2026-08-30)
+
+**1. A single English stopword was admitting unrelated nodes.**
+Matched IDF mass fixed the specificity penalty but introduced a sharper failure in its place:
+a function word that is *rare* in a small course map is weighted **up**, not down. Measured on
+the 20-node fixture, `"and"` occurs in one heading, scores idf **3.351** — over twice
+`TOPIC_MATCH_MIN_EVIDENCE` — and on that word alone admitted `n03` ("1.3 Variables and Scope")
+for the topic `"Adversarial Search and Minimax with Alpha-Beta Pruning"`, **tying** the
+genuinely relevant `n10` ("3.2 Binary Search"). A section on adversarial search would have drawn
+half its questions from a node about variable scoping.
+
+That is Amendment §7 exactly — a topic that half-matches is worse than one that does not match
+at all, because it looks like it worked — and shipping it would have been worse than the defect
+it replaced.
+
+Closed with `config.TOPIC_STOPWORDS`, applied to both topic and node tokens. After:
+
+```
+"Adversarial Search and Minimax with Alpha-Beta Pruning"   -> n10 only        (n03 now 0.0)
+"Uninformed and Informed Search (BFS, DFS, A*, …)"          -> n10, n11
+"Data Structures"                                           -> n04 … n08
+"Constraint Satisfaction Problems"                          -> NO MATCH       (correct)
+```
+
+Raising `TOPIC_MATCH_MIN_TOKEN_LEN` to 4 was rejected: it removes `"and"`/`"the"`/`"for"` and
+also `"MDP"`, `"CSP"`, `"BFS"`, `"DFS"`, `"ID3"` — the tokens a technical syllabus leans on
+hardest. Naming the function words drops the noise without dropping the signal, adds no
+dependency, and carries no subject vocabulary (C5). Mutation-checked: deleting the filter fails
+3 tests.
+
+*Test rewritten:* `test_three_letter_stopwords_survive_the_threshold` asserted the defect —
+that stopwords survive tokenisation and admit a node. Replaced by three tests asserting the
+corrected behaviour: a topic of only function words raises, stopwords no longer admit an
+unrelated node, and short technical acronyms are preserved. No assertion weakened.
+
+**2. The editable install resolves to a dead tree — NOT fixed, flagged.**
+`import coursegen` from outside the repo loads
+`C:\Users\<user>\Documents\Qoder\2026-08-27\6073d82b\coursegen` — Qoder's day-one shadow
+workspace, four days stale and with no `app/` package. Inside the repo cwd wins, which is why
+the suite passes and why this went unnoticed. `uvicorn coursegen.app.main:app` from any other
+directory would fail confusingly, and P7's cold-start rehearsal runs exactly that. Left for the
+human: it is an environment change (`pip install -e .` from `E:\Qoder\prepify`), not a code one.
+Recorded in `todo.md`.
+
+**Gate:**
+```
+$ python -m pytest
+358 passed, 3 warnings in 16.83s
+```
+**Result:** PASS

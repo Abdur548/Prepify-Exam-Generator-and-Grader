@@ -1,6 +1,7 @@
 # Current Pipeline
 
-_Last updated: 2026-08-30 · phase: P5 partial · Spec Amendment 01 stage 3 shipped_
+_Last updated: 2026-08-30 · phase: P5 partial · Spec Amendment 01 stages 1–3 shipped; stage 1's
+topic→node rule replaced with matched IDF mass (stage 4 unblocked)_
 
 ## Flow
 
@@ -368,8 +369,8 @@ modes without saying so.
 | Field | Meaning |
 |---|---|
 | `topic` / `section_id` | The authored topic and the section that asked for it. |
-| `matched_node_ids` / `matched_node_count` | The candidate nodes it selected, after **both** the flag filter and the topic floor. Ascending `node_id`. |
-| `best_score` | Highest match score among the matched nodes; `0.0` when none matched. |
+| `matched_node_ids` / `matched_node_count` | The candidate nodes it selected, after **both** the flag filter and the two topic floors. Ascending `node_id`. |
+| `best_score` | Highest **matched IDF mass** among the admitted nodes; `0.0` when none were admitted. **Not a 0–1 fraction — see the scale warning below.** |
 | `slots_requested` / `slots_filled` | What the blueprint asked for, and what the material could actually support. |
 
 A row with **`matched_node_count == 0` and `slots_filled == 0` is the most important output of
@@ -379,21 +380,73 @@ course map — refilling from elsewhere would produce a complete-looking paper a
 topic never asked for, which is the exact failure option C exists to prevent.
 
 `best_score` is there because **a weak match is more dangerous than no match**: a topic admitted
-at 0.31 silently draws from the wrong nodes, and without the number nothing distinguishes it
-from a match at 0.95. A near-miss *below* the floor is not visible here — it reports as
-`best_score = 0.0`, same as a topic with no overlap at all.
+on thin evidence silently draws from the wrong nodes, and without the number nothing
+distinguishes it from a strong match. A near-miss *below* the floors is not visible here — it
+reports as `best_score = 0.0`, same as a topic with no overlap at all (todo.md).
 
-Matching rule (`exam/allocate.py::_topic_scores`, no new module, no new dependency): case-fold,
+> **⚠ SCALE CHANGE, 2026-08-30.** `best_score` used to be a fraction in `[0, 1]`. It is now
+> **matched IDF mass**: unbounded, growing with topic length, and dependent on the node count.
+> A `4.35` today is not "worse than" a `1.00` yesterday — it is a different quantity. It ranks
+> candidates *within one section on one course map* and must not be compared across either.
+
+#### Matching rule — matched IDF mass (`exam/allocate.py::_topic_scores`)
+
+No new module, no new dependency (`math.log` is stdlib). Tokenisation is unchanged: case-fold,
 split on non-alphanumeric, drop tokens shorter than `TOPIC_MATCH_MIN_TOKEN_LEN = 3` (the
-threshold does the work a stopword list would — the pinned stack has none), take the node's
-tokens from `path` + `key_terms`, and score
-`|topic ∩ node| / |topic|` — the fraction of the **topic's** vocabulary the node carries.
-Deliberately not Jaccard: the question is "does this node cover the topic", not "are these the
-same size", so a long node is not penalised for holding many tokens. A topic that tokenises to
-nothing **raises** — it cannot discriminate anything, and treating it as a match on everything
-would hand the section the whole course map while looking like a successful topic match.
-`TOPIC_MATCH_MIN_SCORE = 0.3` is **UNCALIBRATED** and must be measured against a real course
-deck before it means anything (todo.md).
+threshold does the work a stopword list would — the pinned stack has none); a node's tokens come
+from its `path` + `key_terms`.
+
+```
+df(t)  = number of course-map nodes whose (path + key_terms) tokens contain t
+idf(t) = ln((N + 1) / (df(t) + 1)) + 1          # N = node count; smoothed, always > 0
+mass(topic, node) = Σ idf(t) for t in (topic_tokens ∩ node_tokens)
+```
+
+**Why there is no topic-length denominator.** The rule this replaced was
+`|topic ∩ node| / |topic|`, and it **punished specificity**. Measured on the fixture course map:
+
+```
+"Search"                                              1.000  → matched
+"Uninformed and Informed Search (BFS, DFS, A*, ...)"  0.286  → matched NOTHING
+```
+
+A richer, more precise phrasing of the *same* topic scored 3.5× worse than the bare word,
+because every enumerated term the node happened not to contain sat in the denominator and
+diluted the score — and **every topic in `template_ai_fundamentals_v1` is a long parenthetical
+string of exactly this shape**, so essentially none of them would have matched. IDF-weighting
+the same fraction was tried and rejected on measurement: `0.286 → 0.262`, slightly *worse*,
+because the enumerated terms are rare and are therefore weighted *up* while unmatched. The
+denominator was the problem, not the weighting. Under the new rule the same two topics score
+**3.351** and **6.703** — extra enumerated terms can only *add* evidence.
+
+A topic that tokenises to nothing still **raises** — it cannot discriminate anything, and
+treating it as a match on everything would hand the section the whole course map while looking
+like a successful topic match.
+
+**Admission takes two conditions and needs both:**
+
+```
+best = max mass over the section's candidate nodes      (the FLAG SURVIVORS, not the whole map)
+if best <= 0:                       no match at all
+admit node  iff  mass(node) >= TOPIC_MATCH_RELATIVE_FLOOR * best
+            and  best      >= TOPIC_MATCH_MIN_EVIDENCE
+```
+
+- **Relative floor** (`0.5`) because raw IDF mass scales with corpus size — `idf` depends on `N`,
+  so an absolute-only threshold calibrated on a 20-node fixture would drift on a 200-node
+  course. Ranking against the best match is scale-free.
+- **Absolute evidence floor** (`1.5`) because a purely relative rule always admits the best node,
+  however weak: `mass >= 0.5 * best` is trivially true for the argmax. This is the guard against
+  *"best of a bad lot"*, and it is the only thing between a topic the upload does not cover and a
+  section quietly filled from the wrong nodes.
+- `best <= 0` stays its **own branch** rather than being folded into the evidence check. It has
+  to: if `TOPIC_MATCH_MIN_EVIDENCE` were ever calibrated down to `0`, then `0 >= 0.5 × 0` holds
+  and a relative-only rule would admit the *entire* candidate set on no evidence at all.
+
+Both constants are **UNCALIBRATED** — reasoned, not measured — and must be set against a real
+course deck (todo.md). Two things the fixture already shows, recorded there: the evidence floor
+**never fires** on it (its most common token still scores 2.099, above 1.5), and a rare 3-letter
+connective such as `"and"` is weighted *up* to 3.351 and can admit a node on its own.
 
 ### `SectionSpec` / `Blueprint` invariants (validated at parse time)
 
@@ -469,3 +522,4 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-28 | uncommitted | `chunk.page` = page of the first block contributing to that chunk, not `section.page_start` | A chunk drawn from page 7 of a 5–9 section was cited as page 5. **Changes chunk IDs / Qdrant point IDs — a prior index is stale and must be re-ingested** | Ingest fix |
 | 2026-08-29 | uncommitted | `SectionSpec.topic` (optional), topic→node matching in `exam/allocate.py`, topic filter beside the flag filter, `TopicCoverage` + `CoverageReport.per_topic`, `TOPIC_MATCH_MIN_TOKEN_LEN` / `TOPIC_MATCH_MIN_SCORE` | Spec Amendment 01 option C, signed 2026-08-28: an authored blueprint sets across-topic weights by hand while the solver still allocates within topic from the student's own material, and says so loudly when the material does not cover a topic. `topic is None` **is** the derived path — `solve()` byte-identical on all three shipped blueprints, all 213 prior tests unmodified | Amendment 01 stage 1 |
 | 2026-08-30 | uncommitted | `SectionSpec`/`ItemSpec` gain `grounding` (`span`\|`synthesis`) and `generation_instructions`; both join `spec_hash` **only when non-default**; gate 2 records synthesis items as `not_applicable` rather than passing or failing them; `run_manifest.json` gains `grounding.{synthesis_items, items_total, synthesis_ratio}` + `warnings` past `SYNTHESIS_ITEM_WARN_RATIO = 0.25`; `group_id` removed from the LLM prompt | Amendment 01 §6.4/§6.6. Some exam items legitimately require synthesis (a novel game tree), and gate 2 cannot score what has no source span — but an ungrounded question is not studiable from the upload, so the COUNT has to be visible rather than inferable. `group_id` was excluded from `spec_hash` yet reaching the prompt, so prompt text could vary while the cache key did not. `solve()` byte-identical on all three shipped blueprints, all 314 prior tests unmodified | Amendment 01 stage 3 |
+| 2026-08-30 | uncommitted | Topic→node score replaced: `\|topic ∩ node\| / \|topic\|` → **matched IDF mass** `Σ idf(t)` over the shared tokens, `idf(t) = ln((N+1)/(df(t)+1)) + 1`. `TOPIC_MATCH_MIN_SCORE` removed; admission becomes `TOPIC_MATCH_RELATIVE_FLOOR = 0.5` of the section's best match **and** `TOPIC_MATCH_MIN_EVIDENCE = 1.5` absolute. `TopicCoverage.best_score` changes SCALE (unbounded IDF mass, not a 0–1 fraction) | The old rule **punished specificity**: on the fixture `"Search"` scored 1.000 and matched while `"Uninformed and Informed Search (BFS, DFS, A*, Heuristics)"` — the same topic, phrased precisely — scored 0.286 and matched nothing, because every enumerated term the node lacked sat in the denominator. Every topic in `template_ai_fundamentals_v1` has that shape, so stage 4 could not work. IDF-weighting the fraction was measured and rejected (0.286 → 0.262, worse). New scores: 3.351 and 6.703. Relative floor because idf scales with `N`; absolute floor because a relative rule always admits the argmax. **No fallback preserved** — an unmatched topic still leaves its slots unfilled. `solve()` byte-identical on all three shipped blueprints (`ItemSpec[]`, `spec_hash` and `CoverageReport`), verified against a `git archive` of `ebc6c1b` in a separate process | Amendment 01 stage 1 fix |

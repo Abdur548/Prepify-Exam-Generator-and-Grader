@@ -23,15 +23,28 @@ class TopicCoverage(BaseModel):
 
     ``best_score`` records the near-miss. A topic that matches WEAKLY is more
     dangerous than one that matches nothing, because it silently draws from the
-    wrong nodes; a match at 0.31 and a match at 0.95 are the same "matched" until
-    somebody can see the number.
+    wrong nodes; two topics both read as merely "matched" until somebody can see
+    the number.
+
+    READ THE SCALE BEFORE READING THE NUMBER. ``best_score`` is **matched IDF
+    mass** — ``Σ idf(t)`` over the tokens the topic and the node share — NOT the
+    0–1 fraction of the topic's own vocabulary that it carried before Amendment
+    01's matching rule was replaced. It is unbounded, it grows with topic length,
+    and because ``idf`` depends on the node count it is not comparable across
+    course maps. A 4.35 here is not "worse than" the old 1.00; it is a different
+    quantity. What it supports is a RANKING within one section's candidate set,
+    which is exactly how ``TOPIC_MATCH_RELATIVE_FLOOR`` uses it.
     """
 
     topic: str
     section_id: str
     matched_node_ids: list[str]
     matched_node_count: int
-    best_score: float          # highest score among matched nodes; 0.0 if none matched
+    # Highest matched IDF mass among the ADMITTED nodes; 0.0 if none were admitted.
+    # A topic rejected by TOPIC_MATCH_MIN_EVIDENCE therefore still reports 0.0 even
+    # though its best candidate scored above zero — that near-miss lives only in
+    # the warning text (recorded in todo.md).
+    best_score: float
     slots_requested: int
     slots_filled: int
 

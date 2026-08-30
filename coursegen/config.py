@@ -198,18 +198,87 @@ MAX_REGENERATION_PASSES: int = 1     # R5: cap enforced in code, not just commen
 # An authored blueprint section may name its own `topic`; the solver matches that
 # free text against each node's `path` + `key_terms` to build the candidate set.
 # Both sides are tokenised the same way: case-folded, split on non-alphanumeric,
-# tokens shorter than this dropped. The length threshold is doing the work a
-# stopword list would ("of", "a", "3.2", "A*" all fall out) — there is no stopword
-# list in the pinned stack and matching must not add a dependency for one.
+# tokens shorter than this dropped. This removes heading numbering ("3.2" → "3",
+# "2") and one-letter algorithm names ("A*" → "a"), which is the intended cost.
 TOPIC_MATCH_MIN_TOKEN_LEN: int = 3
-# UNIT: fraction of the TOPIC's own tokens found in the node, in [0, 1].
-# Deliberately NOT Jaccard: the question is "does this node cover the topic", not
-# "are these the same size", so a long node must not be penalised for having many
-# tokens. UNCALIBRATED — 0.3 was chosen by inspection, not measured, and until it
-# is set against a real ingested course deck it does not mean anything. Do NOT
-# tune it against the synthetic test fixtures: they are not representative, and a
-# number fitted to them would look measured while meaning nothing.
-TOPIC_MATCH_MIN_SCORE: float = 0.3
+
+# English function words, removed from BOTH topic and node tokens before matching.
+#
+# The length threshold alone is not enough, and raising it is not the fix. Under
+# matched IDF mass a function word that happens to be RARE in a small course map is
+# weighted UP, not down. Measured on the 20-node fixture: "and" occurs in one
+# heading, scores idf 3.351 — over twice TOPIC_MATCH_MIN_EVIDENCE — and on that word
+# alone admitted "1.3 Variables and Scope" for the topic "Adversarial Search and
+# Minimax with Alpha-Beta Pruning", tying the genuinely relevant "3.2 Binary Search".
+# Amendment §7 names this exactly: a topic that half-matches is worse than one that
+# does not match at all, because it draws questions from the wrong nodes while
+# looking like it worked.
+#
+# Raising TOPIC_MATCH_MIN_TOKEN_LEN to 4 would kill "and"/"the"/"for" — and also
+# "MDP", "CSP", "BFS", "DFS", "ID3", the tokens a technical syllabus leans on hardest.
+# Naming the function words is the only option that removes the noise without
+# removing the signal.
+#
+# Structure words only. No subject vocabulary belongs here (C5) — a term that is
+# uninformative in one discipline is the whole topic in another.
+TOPIC_STOPWORDS: frozenset[str] = frozenset({
+    "and", "the", "for", "with", "from", "into", "onto", "its", "their", "his", "her",
+    "are", "was", "were", "been", "being", "has", "had", "have", "not", "but", "nor",
+    "any", "all", "each", "some", "such", "than", "then", "that", "this", "these",
+    "those", "there", "here", "when", "where", "which", "while", "who", "whom",
+    "you", "your", "our", "via", "per", "out", "off", "over", "under", "between",
+    "using", "used", "use", "based", "about", "also", "how", "why", "what",
+})
+#
+# THE SCORE IS MATCHED IDF MASS, NOT A FRACTION OF THE TOPIC.
+#
+# Stage 1 shipped `|topic ∩ node| / |topic|` and it PUNISHED SPECIFICITY. Measured
+# on tests/fixtures/course_map_sample.json: "Search" scored 1.000 and matched,
+# while "Uninformed and Informed Search (BFS, DFS, A*, Heuristics)" — a richer,
+# more precise phrasing of the SAME topic — scored 0.286 and matched nothing.
+# Every enumerated term the node happens not to carry sits in the denominator and
+# dilutes the score, and every topic in `template_ai_fundamentals_v1` is a long
+# parenthetical string of exactly that shape. IDF-weighting the same fraction does
+# not fix it (measured 0.286 → 0.262, slightly WORSE, because the enumerated terms
+# are rare and so weighted UP while unmatched). The denominator was the problem.
+#
+#     df(t)  = course-map nodes whose (path + key_terms) tokens contain t
+#     idf(t) = ln((N + 1) / (df(t) + 1)) + 1        # N = node count; always > 0
+#     mass(topic, node) = Σ idf(t) for t in (topic_tokens ∩ node_tokens)
+#
+# Same measurement under the new rule: "Search" → 3.351, the long phrasing →
+# 6.703. Extra enumerated terms can now only ADD evidence.
+#
+# Admission takes TWO conditions, and needs both:
+#
+#     best = max mass over the section's candidate nodes
+#     if best <= 0:                    no match at all
+#     admit node  iff  mass(node) >= TOPIC_MATCH_RELATIVE_FLOOR * best
+#                 and  best       >= TOPIC_MATCH_MIN_EVIDENCE
+#
+# UNIT: dimensionless ratio against the best-matching node's mass, in [0, 1].
+# RELATIVE because raw IDF mass scales with corpus size — idf depends on N, so an
+# absolute-only threshold calibrated on a 20-node fixture would drift on a 200-node
+# course. Ranking against the best match is scale-free.
+#
+# UNCALIBRATED. 0.5 says "admit nodes within half the best node's evidence"; it was
+# reasoned, not measured. Do NOT tune it against the synthetic test fixtures: they
+# are a generic CS syllabus, not the real AI deck, and a number fitted to them
+# would look measured while meaning nothing (todo.md).
+TOPIC_MATCH_RELATIVE_FLOOR: float = 0.5
+# UNIT: absolute matched IDF mass, in nats — the same units as one idf(t) term,
+# so it is read as "how distinctive must the best match's evidence be".
+#
+# ABSOLUTE because a purely relative rule always admits the best node, however
+# weak: `mass >= 0.5 * best` is trivially true for the argmax. This is the guard
+# against "best of a bad lot", and it is the only thing standing between a topic
+# the upload does not cover and a section quietly filled from the wrong nodes.
+#
+# UNCALIBRATED. 1.5 is roughly the idf of a term appearing in half the corpus
+# (N=20, df=10 → 1.647), i.e. "require at least one matched term more distinctive
+# than 'half the course mentions it'". Reasoned, not measured, and NOT fitted to
+# the fixtures — same warning as above (todo.md).
+TOPIC_MATCH_MIN_EVIDENCE: float = 1.5
 
 # ---------------------------------------------------------------------------
 # Authored blueprint structure (Spec Amendment 01, stage 2)

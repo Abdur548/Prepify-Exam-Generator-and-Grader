@@ -536,47 +536,108 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
-## Spec Amendment 01 — stage 1 (authored topics)  [SHIPPED — uncommitted 2026-08-29]
+## Spec Amendment 01 — stage 1 (authored topics)  [SHIPPED — uncommitted 2026-08-29;
+## matching rule REPLACED 2026-08-30, see the resolved 🔴 item below]
 
 - [x] `SectionSpec.topic: str | None = None`. `None` **is** the derived path: no topic filter,
       candidates are the whole course map, allocation mass-proportional across everything. All
       three shipped blueprints stay topic-free and `solve()` returns byte-identical `ItemSpec[]`
       on them; all 213 pre-existing tests pass unmodified.
-- [x] Topic→node matching in `exam/allocate.py` (`_tokenise` / `_topic_scores`) — no new module,
-      no new dependency. Candidate filter added beside the flag filter; **no fallback to the
-      unfiltered course map**, unmatched slots stay unfilled.
+- [x] Topic→node matching in `exam/allocate.py` (`_tokenise` / `_node_tokens` / `_idf` /
+      `_topic_scores`) — no new module, no new dependency (`math.log` is stdlib). Candidate
+      filter added beside the flag filter; **no fallback to the unfiltered course map**,
+      unmatched slots stay unfilled. Score is **matched IDF mass** since 2026-08-30.
 - [x] `TopicCoverage` + `CoverageReport.per_topic`; `allocation_fidelity`'s narrowed meaning
       under an authored blueprint documented in `pipeline.md`.
-- [ ] **🔴 BLOCKS STAGE 4 — the scoring rule punishes specificity. Fix the rule, not the
-      threshold.** Measured on the fixture course map:
+- [x] **~~🔴 BLOCKS STAGE 4 — the scoring rule punishes specificity.~~ RESOLVED 2026-08-30 —
+      the RULE was replaced, not the threshold.** The defect, as measured on the fixture:
       ```
       "Search"                                              best = 1.000  -> matches
       "Uninformed and Informed Search (BFS, DFS, A*, ...)"   best = 0.286  -> matches NOTHING
       ```
-      The richer, more precise topic scores **3.5x worse than the bare word for the same
-      topic**, and falls below the floor. Cause: `score = |topic ∩ node| / |topic tokens|`
-      puts every enumerated term in the denominator, so each extra specific term a topic names
-      *lowers* its score unless the node happens to contain it. That is backwards — and **every
-      topic in `template_ai_fundamentals_v1` is a long parenthetical string of exactly this
-      shape**, so essentially all of them would match nothing.
-      This is a design error in the rule the reviewer specified, not an implementation fault:
-      the matcher ranks the right node first and the scoring then throws it away. Lowering the
-      floor is not the fix — it would admit noise everywhere else while leaving the dilution
-      intact. Candidate directions, needing a decision: score against the topic's *distinctive*
-      tokens only (IDF-weight against the course map, so "search" outweighs "and"); or take the
-      best-matching sub-phrase rather than whole-string coverage; or normalise by matched
-      tokens rather than topic length. **Settle this before stage 4; stages 2 and 3 are
-      unaffected.**
-- [ ] **Calibrate `TOPIC_MATCH_MIN_SCORE` against the real AI course deck when it arrives.**
-      0.3 was chosen by inspection, not measured — same class of defect as `GROUNDEDNESS_TAU`
-      and `RERANKER_THRESHOLD`. **Do not tune it against `tests/fixtures/course_map_sample.json`:**
-      that fixture is a generic CS syllabus, not representative, and a number fitted to it would
-      look measured while meaning nothing.
-      Evidence it needs calibration, on the fixture: Amendment 01's own example topic
-      `"Uninformed and Informed Search (BFS, DFS, A*, Heuristics)"` scores **2/7 ≈ 0.286** on
-      `n11` ("3.3 Graph Traversal", key_terms BFS/DFS/visited/adjacency) — the one node that is
-      genuinely about search — and is therefore rejected by a floor of 0.3. The matcher ranks
-      the right node first; the floor is what excludes it.
+      `score = |topic ∩ node| / |topic tokens|` put every enumerated term in the denominator, so
+      each extra specific term a topic named *lowered* its score unless the node happened to
+      contain it. Every topic in `template_ai_fundamentals_v1` is a long parenthetical string of
+      exactly that shape, so essentially none of them would have matched.
+      IDF-weighting the same fraction was tried and rejected on measurement: **0.286 → 0.262,
+      slightly worse**, because the enumerated terms are rare and therefore weighted *up* while
+      unmatched. The denominator was the problem, not the weighting.
+      Replaced by **matched IDF mass with no topic-length denominator** —
+      `mass = Σ idf(t)` over `topic_tokens ∩ node_tokens`,
+      `idf(t) = ln((N+1)/(df(t)+1)) + 1`. Same two topics now score **3.351** and **6.703**:
+      extra enumerated terms can only *add* evidence. `TOPIC_MATCH_MIN_SCORE` is gone; admission
+      is a **relative floor** (`TOPIC_MATCH_RELATIVE_FLOOR = 0.5` of the section's best match,
+      scale-free because idf depends on `N`) **plus an absolute evidence floor**
+      (`TOPIC_MATCH_MIN_EVIDENCE = 1.5`, the guard against "best of a bad lot" — a purely
+      relative rule always admits the argmax). Stage 4 is unblocked.
+- [ ] **Calibrate `TOPIC_MATCH_RELATIVE_FLOOR` and `TOPIC_MATCH_MIN_EVIDENCE` against the real
+      AI course deck when it arrives.** Both are **UNCALIBRATED** — reasoned, not measured, same
+      class as `GROUNDEDNESS_TAU` and `RERANKER_THRESHOLD`. **Do not tune either against
+      `tests/fixtures/course_map_sample.json`:** it is a generic CS syllabus, not the real deck,
+      and a number fitted to it would look measured while meaning nothing.
+      What the fixture *can* say, recorded as evidence for the calibration rather than as a
+      reason to move a number now:
+      - **The evidence floor never fires on this fixture.** Its most common token is `data` at
+        `df = 6` of 20, worth `idf = 2.099` — above 1.5 — so *every* non-zero overlap clears the
+        absolute floor. The floor is exercised only by a synthetic uniform course map
+        (`_uniform_course_map` in the stage-1 tests, where one term appears in all N nodes and so
+        scores exactly 1.0). On a real deck, where headings repeat the course's own name, it will
+        bite far more often. **This is the constant most in need of a real corpus.**
+      - **The relative floor decides a near-tie on this fixture.** "Data Structures" admits
+        `n04`–`n08` at 4.351 and excludes `n02` ("1.2 Data Types") at 2.099, against a floor of
+        2.176 — a margin of 0.077. The exclusion is semantically right, but 0.5 is not *shown*
+        to be right by it.
+      - **Corpus size moves every score.** `idf` depends on `N`, so masses measured on a 20-node
+        fixture do not transfer to a 200-node course. Only the *ranking* does, which is why the
+        primary condition is relative.
+- [x] **CLOSED 2026-08-30 by `config.TOPIC_STOPWORDS`.** English function words are removed from
+      both topic and node tokens before matching. Verified: `"Adversarial Search and Minimax with
+      Alpha-Beta Pruning"` now admits **only** `n10` ("3.2 Binary Search") — `n03` scores 0.0
+      where it previously tied at 3.351. `"of and the"` now tokenises to nothing and **raises**,
+      which is what Amendment 01 stage 1 specified for it in the first place.
+      Raising `TOPIC_MATCH_MIN_TOKEN_LEN` to 4 was rejected as the fix: it would drop `"and"`,
+      `"the"`, `"for"` — and also `"MDP"`, `"CSP"`, `"BFS"`, `"DFS"`, `"ID3"`, the tokens a
+      technical syllabus leans on hardest. No dependency was added; the list is English structure
+      only and carries no subject vocabulary (C5). Mutation-checked: deleting the filter fails 3
+      tests. Original finding retained below for the reasoning.
+
+  <details>
+
+- [ ] ~~**🟠 A single 3-letter stopword now carries enough evidence to admit a node.**~~ Follows
+      directly from the IDF rule and is the most likely source of a wrong match on the real deck.
+      `"and"` appears in exactly one of the fixture's twenty headings, so idf weights it **up** to
+      3.351 — more than twice `TOPIC_MATCH_MIN_EVIDENCE`. Measured consequences on the fixture:
+      `"Adversarial Search and Minimax with Alpha-Beta Pruning"` admits `n03`
+      ("1.3 Variables and Scope") on the word "and" alone, and
+      `"Quantum Cryptography and Lattice Reduction"` — previously a no-match topic — now matches
+      `n03` ("and") and `n17` ("reduction"). This is Amendment §7's "a topic that half-matches is
+      worse than one that does not match at all", arrived at through the front door.
+      Under the old fraction rule the same tokens scored on a bounded 0–1 scale and looked like
+      arithmetic; here the corpus statistics actively **reward** the junk token. It is the same
+      root cause as the `TOPIC_MATCH_MIN_TOKEN_LEN` gap recorded below, but it has gone from
+      cosmetic to load-bearing. Fix is a decision, not a guess — raise the threshold to 4, add a
+      real stopword list (new dependency, currently prohibited), or accept it. Pinned by
+      `TestMalformedTopicRaises::test_three_letter_stopwords_survive_the_threshold` and by the
+      comment on `TOPIC_ABSENT` in the stage-1 tests, both of which document the behaviour rather
+      than bless it.
+
+  </details>
+
+- [ ] **🔴 The editable install points at a DEAD tree — fix before any demo rehearsal.**
+      `pip install -e .` was originally run from Qoder's day-one shadow workspace, and the
+      `.pth`/finder still resolves there:
+      ```
+      import coursegen  from outside the repo → C:\Users\<you>\Documents\Qoder\2026-08-27\6073d82b\coursegen
+      import coursegen  from inside  the repo → E:\Qoder\prepify\coursegen
+      ```
+      Inside the repo, cwd wins and everything is correct — which is why 358 tests pass and why
+      this went unnoticed for four days. Anywhere else it silently imports **four-day-old code**
+      that has no `app/` package at all, so `uvicorn coursegen.app.main:app` from any other
+      directory fails with a confusing ImportError rather than a real one. P7's cold-start
+      rehearsal runs exactly that command.
+      Fix: `pip install -e .` **from `E:\Qoder\prepify`**, then confirm
+      `cd C:\ && python -c "import coursegen; print(coursegen.__file__)"` reports the E: path.
+      The stale tree at `Documents\Qoder\2026-08-27\6073d82b` can then be deleted.
 
 ### Open for the human — recorded, deliberately NOT resolved in stage 1
 
@@ -584,18 +645,22 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
       shorter than `TOPIC_MATCH_MIN_TOKEN_LEN` (set it to 3)" and separately gives `"of and the"`
       as a topic that must raise. Those conflict: `"and"` and `"the"` are exactly 3 characters,
       so they survive `len(tok) >= 3`. The rule was implemented **as written**; `"of and the"`
-      therefore tokenises to `{and, the}` and matches `n03` ("1.3 Variables and Scope") at 0.50
-      on the strength of the word "and". Pinned by
+      therefore tokenises to `{and, the}` and matches `n03` ("1.3 Variables and Scope") on the
+      strength of the word "and". Pinned by
       `TestMalformedTopicRaises::test_three_letter_stopwords_survive_the_threshold`, which
       documents the gap rather than blessing it. Fix is a decision, not a guess: raise the
       threshold to 4, add a real stopword list (new dependency — currently prohibited), or
-      accept that 3-letter connectives dilute the denominator.
-- [ ] **A near-miss below the floor is invisible.** `TopicCoverage.best_score` is specified as
-      "highest score among **matched** nodes; 0.0 if none matched", so a topic whose best node
-      scored 0.29 reports `best_score = 0.0` — indistinguishable from a topic with no overlap at
-      all. Amendment §7 calls the half-match the *more* dangerous case. Recording the best score
-      over all candidates (matched or not) would make it inspectable; that changes the field's
-      specified meaning, so it needs a decision.
+      accept it. **Escalated 2026-08-30** — under matched IDF mass a rare connective is weighted
+      *up* rather than diluted, so this is no longer cosmetic; see the 🟠 item above.
+- [ ] **A near-miss below the floor is still invisible.** `TopicCoverage.best_score` is "highest
+      score among **admitted** nodes; 0.0 if none were admitted", so a topic whose best candidate
+      scored just under `TOPIC_MATCH_MIN_EVIDENCE` reports `0.0` — indistinguishable from a topic
+      with no overlap at all. Amendment §7 calls the half-match the *more* dangerous case.
+      **Cheaper to close than it was:** the replacement rule computes `best` over the candidate
+      set explicitly, before admission, and the rejection warning already prints it — reporting
+      it in the field is a one-line change. It was deliberately NOT made, because it changes the
+      field's specified meaning (currently "among admitted"), and the amendment's brief was to
+      change the SCALE of `best_score`, not when it is populated. Needs a decision.
 - [ ] **Solve order still keys only on `requires_flags_any`.** A topic-restricted section is at
       least as constrained as a flag-restricted one, so in a MIXED blueprint (some sections
       topical, some not) an unconstrained section solved first can drain the spans a topical

@@ -10,6 +10,7 @@ and the LLM only phrases what code specifies.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections import defaultdict
 from typing import Optional
@@ -201,25 +202,70 @@ def _solve_section(
     if section.topic is not None:
         # Applied to the flag survivors only, so matched_node_ids reports the
         # candidate set the allocation actually drew from — not nodes that score
-        # well on the topic but were already excluded by the flags.
+        # well on the topic but were already excluded by the flags. `best` is
+        # taken over those same survivors for the same reason: ranking against a
+        # node the flags already removed would admit on evidence this section can
+        # never draw from.
+        best = max((scores[n.node_id] for n in candidates), default=0.0)
+
+        if best <= 0.0:
+            # Zero shared vocabulary with every candidate. Kept as its own branch
+            # rather than folded into the evidence check below, because it stays
+            # correct if TOPIC_MATCH_MIN_EVIDENCE is ever calibrated down to 0:
+            # `0 >= TOPIC_MATCH_RELATIVE_FLOOR * 0` is true, so a relative-only
+            # rule would admit the ENTIRE candidate set on no evidence at all.
+            warnings.append(
+                f"Section {section.section_id!r}: no nodes matched topic "
+                f"{section.topic!r} — zero token overlap with any candidate node; "
+                f"section skipped. The uploaded material does not appear to cover "
+                f"this topic — its slots are left unfilled rather than filled from "
+                f"elsewhere in the course map."
+            )
+            return _unfilled_section()
+
+        if best < config.TOPIC_MATCH_MIN_EVIDENCE:
+            # "Best of a bad lot". A purely relative rule ALWAYS admits the
+            # argmax — `mass >= 0.5 * best` is trivially true for it — so without
+            # this floor a topic sharing one throwaway term with one node would
+            # quietly take that node's spans and print a complete-looking paper.
+            warnings.append(
+                f"Section {section.section_id!r}: no nodes matched topic "
+                f"{section.topic!r} — best matched evidence {best:.3f} is below "
+                f"TOPIC_MATCH_MIN_EVIDENCE={config.TOPIC_MATCH_MIN_EVIDENCE}; "
+                f"section skipped. The closest node matched only on terms too "
+                f"common to carry evidence — its slots are left unfilled rather "
+                f"than filled from elsewhere in the course map."
+            )
+            return _unfilled_section()
+
+        # Ranked against the best match rather than against an absolute score:
+        # IDF mass scales with corpus size (idf depends on N) and with topic
+        # length, so an absolute-only cut calibrated on one course map would
+        # drift on the next. The floor above is what stops the ranking from
+        # admitting a whole set of equally-worthless matches.
         candidates = [
             n for n in candidates
-            if scores[n.node_id] >= config.TOPIC_MATCH_MIN_SCORE
+            if scores[n.node_id] >= config.TOPIC_MATCH_RELATIVE_FLOOR * best
         ]
         topic_matched_ids = [n.node_id for n in candidates]
         topic_best_score = max(
             (scores[nid] for nid in topic_matched_ids), default=0.0
         )
 
+        # Structural postcondition, not a taste check: `best` is the max over the
+        # candidates, so the node achieving it satisfies `mass >= floor * best`
+        # for any floor in [0, 1] and the set CANNOT be empty here. If it ever is,
+        # the floor has been configured outside that range and the section would
+        # silently report "no material for this topic" about material that is
+        # there. Raised rather than asserted — `python -O` strips asserts.
         if not candidates:
-            warnings.append(
-                f"Section {section.section_id!r}: no nodes matched topic "
-                f"{section.topic!r} at score >= {config.TOPIC_MATCH_MIN_SCORE}; "
-                f"section skipped. The uploaded material does not appear to cover "
-                f"this topic — its slots are left unfilled rather than filled from "
-                f"elsewhere in the course map."
+            raise ValueError(
+                f"Section {section.section_id!r}: topic {section.topic!r} scored "
+                f"{best:.3f} on its best candidate yet admitted no nodes at "
+                f"TOPIC_MATCH_RELATIVE_FLOOR="
+                f"{config.TOPIC_MATCH_RELATIVE_FLOOR}. The relative floor must be "
+                f"a fraction in [0, 1]."
             )
-            return _unfilled_section()
 
     # Step 2: renormalise mass over the candidate set.
     total_mass = sum(n.instructional_mass for n in candidates)
@@ -459,35 +505,102 @@ _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 def _tokenise(text: str) -> set[str]:
     """Case-folded alphanumeric tokens, short ones dropped.
 
-    The length threshold is doing the work a stopword list would — the pinned
-    stack has no stopword list and this must not add a dependency for one. It
-    also drops heading numbering ("3.2" → "3", "2") and one-letter algorithm
-    names ("A*" → "a"), which is the intended cost.
+    The length threshold drops heading numbering ("3.2" → "3", "2") and
+    one-letter algorithm names ("A*" → "a"), which is the intended cost.
+
+    It is NOT sufficient alone, and raising it is not the fix. Under matched IDF
+    mass a function word that happens to be RARE in a small course map is
+    weighted UP, not down: measured on the 20-node fixture, "and" occurs in one
+    heading, scores idf 3.351, and on that alone admitted "1.3 Variables and
+    Scope" for the topic "Adversarial Search and Minimax with Alpha-Beta
+    Pruning" — tying the genuinely relevant "3.2 Binary Search". A topic that
+    half-matches is worse than one that does not match at all, because it draws
+    questions from the wrong nodes while looking like it worked.
+
+    Raising the threshold to 4 would kill "and"/"the"/"for" but also "MDP",
+    "CSP", "BFS", "DFS", "ID3" — exactly the tokens a technical syllabus leans
+    on. So the function words are named explicitly instead. The list is English
+    structure only, carries no subject assumption (C5), and needs no dependency.
     """
     return {
         tok for tok in _TOKEN_RE.findall(text.casefold())
         if len(tok) >= config.TOPIC_MATCH_MIN_TOKEN_LEN
+        and tok not in config.TOPIC_STOPWORDS
+    }
+
+
+def _node_tokens(node: CourseMapNode) -> set[str]:
+    """A node's vocabulary: its heading `path` plus its YAKE `key_terms`.
+
+    Tokenised exactly as the topic is, so the two sides are comparable.
+    """
+    return _tokenise(" ".join(list(node.path) + list(node.key_terms)))
+
+
+def _idf(nodes: list[CourseMapNode]) -> dict[str, float]:
+    """token → smoothed inverse document frequency over the course map.
+
+        df(t)  = number of nodes whose (path + key_terms) tokens contain t
+        idf(t) = ln((N + 1) / (df(t) + 1)) + 1        # N = node count
+
+    Smoothed on both sides and floored by the +1, so idf is ALWAYS > 0: a token
+    every node carries still contributes a little evidence rather than none, and
+    no arrangement of the corpus can make a matched term subtract.
+
+    Only tokens the corpus actually contains get an entry. A topic token with
+    df = 0 can never appear in an intersection, so it never needs a value.
+    """
+    n_total = len(nodes)
+    df: dict[str, int] = defaultdict(int)
+    for node in nodes:
+        for tok in _node_tokens(node):
+            df[tok] += 1
+    return {
+        tok: math.log((n_total + 1) / (count + 1)) + 1.0
+        for tok, count in df.items()
     }
 
 
 def _topic_scores(topic: str, nodes: list[CourseMapNode]) -> dict[str, float]:
-    """node_id → fraction of the TOPIC's tokens that the node carries.
+    """node_id → MATCHED IDF MASS: Σ idf(t) over the tokens the two share.
 
-    A node's tokens come from its heading `path` plus its YAKE `key_terms`,
-    tokenised the same way as the topic.
+        mass(topic, node) = Σ idf(t) for t in (topic_tokens ∩ node_tokens)
 
-    score = |topic_tokens ∩ node_tokens| / |topic_tokens|
+    There is NO topic-length denominator, and that is the whole point. The rule
+    this replaces was `|topic ∩ node| / |topic|`, which PUNISHED SPECIFICITY:
+    every enumerated term the node happened not to carry sat in the denominator
+    and diluted the score. Measured on tests/fixtures/course_map_sample.json,
+    "Search" scored 1.000 and matched, while "Uninformed and Informed Search
+    (BFS, DFS, A*, Heuristics)" — a richer, more precise phrasing of the SAME
+    topic — scored 0.286 and matched nothing. Every topic in an authored AI
+    blueprint is a long parenthetical string of exactly that shape, so
+    essentially none of them would have matched.
 
-    Deliberately NOT Jaccard. The question is "does this node cover the topic",
-    not "are these two the same size", so a long node must not be penalised for
-    holding many tokens.
+    IDF-weighting the fraction does NOT fix it — measured 0.286 → 0.262, slightly
+    WORSE, because the enumerated terms are rare and therefore weighted UP while
+    unmatched. The denominator was the problem, not the weighting. Under this
+    rule the same two topics score 3.351 and 6.703: extra enumerated terms can
+    only ADD evidence.
+
+    The cost, stated rather than hidden: mass is UNBOUNDED, and grows with both
+    topic length and corpus size (idf depends on N). It is therefore NOT a
+    confidence in [0, 1] and must not be compared across course maps. Admission
+    is ranked against the best match (`TOPIC_MATCH_RELATIVE_FLOOR`) with an
+    absolute evidence floor (`TOPIC_MATCH_MIN_EVIDENCE`) beneath it — the two
+    conditions are applied in `_solve_section`, not here, because `best` is taken
+    over the SECTION's candidate set rather than over the whole course map.
+
+    DETERMINISM: each node's sum runs over SORTED tokens. Floating-point addition
+    is not associative and set iteration order depends on PYTHONHASHSEED, so
+    summing straight out of the set could differ in the last bit between
+    processes — enough to move a node across the relative floor in a near-tie,
+    and enough to break "identical inputs → byte-identical output".
 
     An empty topic token set RAISES: a topic made only of short words cannot
-    discriminate anything, and dividing by zero — or treating it as a match on
-    everything — would hand the section the whole course map while looking like
-    a successful topic match. That is a malformed blueprint and it must be fixed
-    by its author, not papered over here. Raised rather than asserted because
-    `python -O` strips asserts.
+    discriminate anything, and treating it as a match on everything would hand
+    the section the whole course map while looking like a successful topic match.
+    That is a malformed blueprint and must be fixed by its author, not papered
+    over here. Raised rather than asserted because `python -O` strips asserts.
     """
     topic_tokens = _tokenise(topic)
     if not topic_tokens:
@@ -497,10 +610,9 @@ def _topic_scores(topic: str, nodes: list[CourseMapNode]) -> dict[str, float]:
             f"{config.TOPIC_MATCH_MIN_TOKEN_LEN}. A topic that cannot be tokenised "
             f"cannot select candidate nodes; fix the topic in the blueprint."
         )
+    idf = _idf(nodes)
     return {
-        n.node_id: len(
-            topic_tokens & _tokenise(" ".join(list(n.path) + list(n.key_terms)))
-        ) / len(topic_tokens)
+        n.node_id: sum(idf[tok] for tok in sorted(topic_tokens & _node_tokens(n)))
         for n in nodes
     }
 
