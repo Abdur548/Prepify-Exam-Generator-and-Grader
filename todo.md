@@ -409,9 +409,33 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ## P4 — Render + chat  [PARTIAL — code tests PASS 2026-08-28; PDF gate blocked by GTK]
 
-- [ ] **Calibrate `RERANKER_THRESHOLD` against measured cross-encoder logits** — same issue and
-      same model as `GROUNDEDNESS_TAU` above. Code supports threshold-based routing, but the
-      current value is still uncalibrated and must be measured before P4 PASS.
+- [x] **`RERANKER_THRESHOLD` CALIBRATED 2026-08-29: 0.5 → −2.0.** Measured against the real
+      model, not reasoned about. `CrossEncoder.default_activation_function` is `Identity` — no
+      sigmoid — so the scores are raw unbounded logits: a perfect match scored **+9.48**,
+      nonsense **−11.23**. Over a lecture-slide-shaped corpus, genuinely answerable queries
+      scored **+1.68 … +7.97** and near-misses (same field, adjacent vocabulary, absent from the
+      corpus) **−11.40 … −5.99**. Far-irrelevant queries all sat below −10.9 and never mattered;
+      **near-misses are the real boundary.** −2.0 sits near the midpoint of (−5.99, +1.68) with
+      ~4.0 margin above and ~3.7 below. 0.5 also classified the set perfectly, but was badly
+      placed — 6.5 of margin on one side and 1.2 on the other, so a paraphrased or
+      lightly-covered question scoring +0.3 would have been wrongly told "not from your
+      material". `TestRerankerThresholdCalibration` pins the measured bounds; verified that
+      restoring 0.5 makes it fail.
+- [ ] **Re-check the threshold against the real AI deck.** Near-miss scores rise as a corpus
+      covers more adjacent topics, and that ceiling is what the threshold must clear. The
+      measurement above used representative but synthetic passages.
+- [ ] **`GROUNDEDNESS_TAU` is still uncalibrated — and must NOT copy −2.0.** Same model, but a
+      question-vs-chunk score and an answer-vs-its-own-source-span score have different
+      distributions. A generated answer derived from its span is far more similar than a
+      question is to a passage, so grounded pairs cluster much higher; borrowing the retrieval
+      threshold would pass essentially everything and the gate would stop gating. Calibrate it
+      the same way: grounded answers vs their spans, hallucinated answers vs the same spans,
+      value between them. The warning is recorded in `config.py` next to the constant.
+- [x] **Both pinned models now present on disk.** `BAAI/bge-m3` was already cached;
+      `cross-encoder/ms-marco-MiniLM-L-6-v2` (~90 MB) was **not** — meaning the groundedness
+      gate and the chat reranker had only ever run against injected stubs, and R8's "models
+      present on disk" preflight would have failed. Downloaded 2026-08-29 with the human's
+      approval. **P7: the demo machine needs both — do not discover this cold on the day.**
 - [x] **Verify `weasyprint` imports on Windows** before relying on it. It fails on this machine:
       missing `libgobject-2.0-0` / GTK/Pango native runtime. README prerequisite added.
 - [x] Renderer and coverage view display `fill_ratio` alongside `coverage_ratio` and surface

@@ -5,12 +5,15 @@ TDD RED first: these tests define the P4 APIs before implementation.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from coursegen import config
 from coursegen.contracts.coverage import CoverageReport, NodeCoverage
 from coursegen.contracts.item import GeneratedItem, MCQOption, SourceRef
 
@@ -140,13 +143,35 @@ class TestRenderArtifacts:
         assert "Correct option: C" in key_html
         assert "Correct option: A" not in key_html
 
-    def test_weasyprint_preflight_reports_missing_native_runtime(self) -> None:
+    def test_weasyprint_preflight_raises_with_an_actionable_message(self) -> None:
+        """
+        The message is the whole point of the preflight: R8 wants a legible startup
+        failure instead of a crash mid-generation, so it must name the library and
+        the native runtime.
+
+        The import is forced to fail rather than being left to the machine's actual
+        state. The previous version of this test asserted only inside an
+        `except RuntimeError`, so once GTK was installed the call succeeded, the
+        except never fired, and the test passed having executed ZERO assertions —
+        green in both worlds, therefore evidence in neither.
+        """
         check_weasyprint_available, _ = _import_render()
-        try:
-            check_weasyprint_available()
-        except RuntimeError as exc:
-            assert "WeasyPrint" in str(exc)
-            assert "GTK" in str(exc) or "native" in str(exc)
+
+        # sys.modules[name] = None makes `import name` raise ImportError.
+        with patch.dict(sys.modules, {"weasyprint": None}):
+            with pytest.raises(RuntimeError) as excinfo:
+                check_weasyprint_available()
+
+        message = str(excinfo.value)
+        assert "WeasyPrint" in message
+        assert "GTK" in message or "native" in message
+
+    def test_weasyprint_preflight_is_silent_when_the_runtime_is_present(self) -> None:
+        """The other half: with the import succeeding, the preflight must not raise."""
+        check_weasyprint_available, _ = _import_render()
+
+        with patch.dict(sys.modules, {"weasyprint": MagicMock()}):
+            check_weasyprint_available()   # must not raise
 
 
 class FakeQdrantClient:
@@ -208,6 +233,56 @@ class FakeLLM:
     def call(self, messages: list[dict[str, str]], response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
         self.calls.append(messages)
         return {"answer": "TCP is explained in the uploaded slides."}
+
+
+class TestRerankerThresholdCalibration:
+    """
+    Every other test in this file injects an explicit `threshold=`, which is right —
+    they test the mechanism, not the value. The consequence is that nothing exercises
+    the CONFIGURED default, and that default is the one a reader is most likely to
+    "correct" back to something in [0, 1] on the assumption that it is a similarity.
+
+    It is not. `ms-marco-MiniLM-L-6-v2` runs with an Identity activation and emits
+    unbounded logits; measured 2026-08-29, a perfect match scored +9.48 and nonsense
+    -11.23. These bounds pin the calibration recorded in config.py.
+    """
+
+    # Measured over a lecture-slide-shaped corpus — see config.RERANKER_THRESHOLD.
+    WEAKEST_GENUINE_MATCH = 1.68
+    STRONGEST_NEAR_MISS = -5.99
+
+    def test_default_threshold_is_a_logit_not_a_probability(self) -> None:
+        assert not (0.0 < config.RERANKER_THRESHOLD <= 1.0), (
+            f"RERANKER_THRESHOLD={config.RERANKER_THRESHOLD} looks like a probability. "
+            "The reranker emits raw logits (~-11..+11), not a 0-1 similarity."
+        )
+
+    def test_default_threshold_separates_the_measured_distributions(self) -> None:
+        """
+        It must admit the weakest genuinely-relevant query and still reject the
+        strongest near-miss. Near-misses — same field, adjacent vocabulary, absent
+        from the corpus — are the real boundary; far-irrelevant queries all sat below
+        -10.9 and never came close to mattering.
+        """
+        assert self.STRONGEST_NEAR_MISS < config.RERANKER_THRESHOLD < self.WEAKEST_GENUINE_MATCH, (
+            f"RERANKER_THRESHOLD={config.RERANKER_THRESHOLD} falls outside the measured "
+            f"boundary ({self.STRONGEST_NEAR_MISS}, {self.WEAKEST_GENUINE_MATCH}); "
+            "recalibrate rather than nudging it."
+        )
+
+    def test_threshold_has_margin_on_both_sides(self) -> None:
+        """
+        A value inside the gap but hard against one edge is fragile: 0.5 classified the
+        measured set perfectly while sitting 1.2 from the relevant floor and 6.5 from
+        the near-miss ceiling, so a lightly-covered question would have been wrongly
+        routed to "not from your material".
+        """
+        below = config.RERANKER_THRESHOLD - self.STRONGEST_NEAR_MISS
+        above = self.WEAKEST_GENUINE_MATCH - config.RERANKER_THRESHOLD
+        assert min(below, above) >= 2.0, (
+            f"margins are lopsided: {below:.2f} above the near-miss ceiling, "
+            f"{above:.2f} below the relevant floor"
+        )
 
 
 class TestChatAnswer:

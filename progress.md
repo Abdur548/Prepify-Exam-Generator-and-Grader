@@ -1518,3 +1518,64 @@ tests/test_p1_ingest.py::TestIngestPointCount::test_multi_document_corpus_point_
 
 **Result:** PASS. Chunk IDs changed by design — a previously built Qdrant index is stale
 and must be re-ingested.
+
+---
+
+## P4 follow-up — vacuous test replaced, reranker threshold calibrated (2026-08-29)
+
+**1. A test had quietly stopped testing anything.**
+`test_weasyprint_preflight_reports_missing_native_runtime` asserted only *inside* an
+`except RuntimeError`. It was meaningful while GTK was missing; the moment the runtime was
+installed the call succeeded, the except never fired, and the test passed having executed
+**zero assertions** — green in both worlds, therefore evidence in neither, and nothing would
+ever have surfaced it. Replaced by two tests that force each branch deterministically via
+`sys.modules` rather than depending on the machine's state: one asserts the message names the
+library and the native runtime, one asserts the preflight is silent when the import succeeds.
+Mutation-checked — breaking the error message makes it fail.
+
+**2. GTK installed; the real PDF path verified end to end.**
+`exam.pdf` 8823 bytes and `answer_key.pdf` 9159 bytes, both with `%PDF` magic. No test invokes
+real WeasyPrint (all inject a `pdf_writer`), so the suite stays environment-independent.
+
+**3. Both pinned models are now on disk.** `BAAI/bge-m3` was already cached;
+`cross-encoder/ms-marco-MiniLM-L-6-v2` was **not**, so the groundedness gate and the chat
+reranker had only ever executed against injected stubs, and R8's "models present on disk"
+preflight would have failed. Downloaded with approval.
+
+**4. `RERANKER_THRESHOLD` calibrated: 0.5 → −2.0.**
+Measured rather than reasoned about. `default_activation_function` is `Identity`, so scores are
+raw unbounded logits — a perfect match scored **+9.48**, nonsense **−11.23**.
+
+```
+genuinely answerable queries   +1.68 .. +7.97     (weakest +1.68)
+near-miss queries             -11.40 .. -5.99     (strongest -5.99)
+far-irrelevant queries        -11.35 .. -10.96
+```
+
+The first irrelevant set (cricket, tomatoes, tax returns) was too easy and flattered the
+threshold; **near-misses — same discipline, adjacent vocabulary, absent from the corpus — are
+the real boundary.** The strongest was "supervised vs unsupervised learning" at −5.99, high
+because the corpus mentions learning at all.
+
+So the boundary lies in (−5.99, +1.68). −2.0 sits near its midpoint: ~4.0 above the strongest
+near-miss, ~3.7 below the weakest genuine match. 0.5 also classified the measured set perfectly
+— 0 false positives, 0 false negatives — but was **badly placed**, with 6.5 of margin on one
+side and 1.2 on the other. A paraphrased or lightly-covered question scoring +0.3 would have
+been wrongly routed to "not from your material".
+
+`TestRerankerThresholdCalibration` pins the measured bounds and guards the *configured default*
+— every other test injects an explicit threshold, so nothing previously exercised it. Verified
+that restoring 0.5 makes it fail.
+
+**`GROUNDEDNESS_TAU` deliberately left uncalibrated**, with a warning in `config.py` against
+copying −2.0 into it: same model, different task. An answer scored against its own source span
+is far more similar than a question is to a passage, so grounded pairs cluster much higher and
+the borrowed value would pass everything.
+
+**Gate:**
+```
+$ python -m pytest
+........................                                                 [100%]
+240 passed in 14.97s
+```
+**Result:** PASS

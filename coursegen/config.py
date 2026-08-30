@@ -133,11 +133,27 @@ EMBEDDING_BATCH_SIZE: int = 32
 RETRIEVE_TOP_K: int = 10
 RERANK_TOP_K: int = 5
 SEND_TOP_K: int = 4                  # L9: retrieve 10, rerank to 5, send 4
-# UNIT: raw cross-encoder logit, NOT a 0-1 similarity. ms-marco-MiniLM-L-6-v2 emits
-# unbounded logits (roughly -11 to +11). This value is UNCALIBRATED — it was chosen as
-# though it were a probability. It must be set from measured logits at P4 before it
-# means anything. Do not adjust it without measurement.
-RERANKER_THRESHOLD: float = 0.5
+# UNIT: raw cross-encoder logit, NOT a 0-1 similarity. CALIBRATED 2026-08-29 against
+# the real model rather than reasoned about: CrossEncoder.default_activation_function is
+# Identity (no sigmoid), a perfect match scores +9.48 and nonsense -11.23.
+#
+# Measured top-1 scores over a lecture-slide-shaped corpus:
+#
+#   genuinely answerable queries   +1.68 .. +7.97   (weakest: +1.68)
+#   near-miss queries              -11.40 .. -5.99  (strongest: -5.99)
+#     — same discipline, adjacent vocabulary, absent from the corpus. These, not
+#       cricket and tomatoes, are the real decision boundary; far-irrelevant queries
+#       all sat below -10.9 and never came close to mattering.
+#
+# So the boundary lies in (-5.99, +1.68) and -2.0 sits near its midpoint: ~4.0 of margin
+# above the strongest near-miss, ~3.7 below the weakest genuine match. The previous 0.5
+# also classified this set perfectly, but was badly placed — 6.5 of margin on one side
+# and 1.2 on the other, so a paraphrased or lightly-covered question scoring +0.3 would
+# have been wrongly told "not from your material".
+#
+# Re-check against the real course deck: near-miss scores rise as a corpus covers more
+# adjacent topics, and that ceiling is what this threshold has to clear.
+RERANKER_THRESHOLD: float = -2.0
 RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # ---------------------------------------------------------------------------
@@ -152,8 +168,17 @@ YAKE_TOP_N: int = 10
 # ---------------------------------------------------------------------------
 BATCH_SIZE: int = 6                  # item specs per LLM call
 # UNIT: raw cross-encoder logit from ms-marco-MiniLM-L-6-v2 (unbounded, roughly
-# -11 to +11), NOT a 0-1 similarity. UNCALIBRATED — must be set from measured logits
-# at P3 before it means anything. Do not adjust it without measurement.
+# -11 to +11), NOT a 0-1 similarity. STILL UNCALIBRATED — must be set from measured
+# logits before it means anything. Do not adjust it without measurement.
+#
+# DO NOT COPY RERANKER_THRESHOLD (-2.0) HERE. Same model, different task, different
+# score distribution. RERANKER_THRESHOLD scores a QUESTION against a candidate chunk;
+# this scores a generated ANSWER against the span it was written from. An answer
+# derived from its own source is far more similar than a question is to a passage, so
+# grounded pairs will cluster much higher — a threshold borrowed from the retrieval
+# distribution would pass essentially everything and the gate would stop gating.
+# Calibrate it the same way: score genuinely-grounded answers against their spans,
+# score hallucinated answers against the same spans, and put the value between them.
 GROUNDEDNESS_TAU: float = 0.45
 DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
 OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length
