@@ -352,10 +352,11 @@ rather than the other way round. Still needs the human's explicit call.
 
 ## P3 — Generation + validation  [COMPLETE — gate PASS 2026-08-28]
 
-- [ ] **Calibrate `GROUNDEDNESS_TAU` against measured cross-encoder logits.** The current value
-      0.45 was chosen as though it were a 0–1 similarity, but
-      `cross-encoder/ms-marco-MiniLM-L-6-v2` emits unbounded raw logits (roughly −11 to +11).
-      Until it is set from measurement it does not mean anything. Do not guess a new number.
+- [x] **`GROUNDEDNESS_TAU` closed 2026-09-01 — by deleting the constant, not calibrating it.**
+      The premise was wrong. Measured on real spans, the reranker cannot separate a true claim
+      from a false one about the same span (true −0.33..+4.21, false −8.73..+4.84, top scorer
+      false), so no threshold exists to find. Gate renamed `relevance`, `RELEVANCE_FLOOR = −2.0`,
+      and the manifest no longer claims groundedness. See the disproof in `config.py`.
 - [x] Confirm or replace the invented `eligibility` definition before `generate.py` consumes it
       — P3 does not consume `eligibility`; generation passes the full `ItemSpec` through the prompt
       as solver output, and validation uses only `slot_id`, `item_type`, `span_ids`, and `spec_hash`.
@@ -424,13 +425,15 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] **Re-check the threshold against the real AI deck.** Near-miss scores rise as a corpus
       covers more adjacent topics, and that ceiling is what the threshold must clear. The
       measurement above used representative but synthetic passages.
-- [ ] **`GROUNDEDNESS_TAU` is still uncalibrated — and must NOT copy −2.0.** Same model, but a
-      question-vs-chunk score and an answer-vs-its-own-source-span score have different
-      distributions. A generated answer derived from its span is far more similar than a
-      question is to a passage, so grounded pairs cluster much higher; borrowing the retrieval
-      threshold would pass essentially everything and the gate would stop gating. Calibrate it
-      the same way: grounded answers vs their spans, hallucinated answers vs the same spans,
-      value between them. The warning is recorded in `config.py` next to the constant.
+- [x] **Superseded 2026-09-01. This entry was wrong, and worth keeping as a record of how.**
+      It reasoned that grounded pairs "cluster much higher" and so −2.0 must be too permissive.
+      Measurement showed the clusters do not exist: the score tracks topical relevance, which
+      both true and false claims about a span share. The floor IS −2.0, for the reason this
+      entry rejected — it is the same task. Reasoning about a distribution is not measuring it.
+- [ ] **Replace the instrument if factuality checking is actually wanted.** An NLI/entailment
+      cross-encoder, or the LLM as verifier (~1 call/item, against the free-tier cap). Until
+      one lands, nothing in the pipeline may report that items are verified against the source.
+      Blocks any product claim of the form "grounded in your material".
 - [x] **Both pinned models now present on disk.** `BAAI/bge-m3` was already cached;
       `cross-encoder/ms-marco-MiniLM-L-6-v2` (~90 MB) was **not** — meaning the groundedness
       gate and the chat reranker had only ever run against injected stubs, and R8's "models
