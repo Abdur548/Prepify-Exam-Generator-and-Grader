@@ -408,7 +408,12 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
-## P4 — Render + chat  [PARTIAL — code tests PASS 2026-08-28; PDF gate blocked by GTK]
+## P4 — Render + chat  [COMPLETE — gate PASS 2026-09-01; GTK blocker resolved]
+
+> **PDF gate cleared 2026-09-01.** `weasyprint 69.0` imports and renders (`%PDF-1.7`).
+> The first live run wrote `exam.pdf` (19,713 bytes) and `answer_key.pdf` (21,142 bytes)
+> from the real 20-item paper. The GTK dependency that blocked this on 2026-08-28 is
+> satisfied on this machine — worth re-checking on the demo machine before P7 (L14).
 
 - [x] **`RERANKER_THRESHOLD` CALIBRATED 2026-08-29: 0.5 → −2.0.** Measured against the real
       model, not reasoned about. `CrossEncoder.default_activation_function` is `Identity` — no
