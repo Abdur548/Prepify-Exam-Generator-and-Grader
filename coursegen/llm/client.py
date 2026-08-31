@@ -194,8 +194,21 @@ class LLMClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            # Include the provider's RESPONSE BODY, not just httpx's summary.
+            #
+            # `str(exc)` is only "Client error '404 Not Found' for url ..." — the
+            # reason lives in the body, and dropping it makes every API failure
+            # undiagnosable. Measured on the first real run: a 404 whose body said
+            # "models/gemini-2.0-flash-lite is no longer available, use
+            # models/gemini-3.5-flash-lite" surfaced as a bare 404, and finding the
+            # cause needed a separate probe script against the live API.
+            #
+            # Still redacted (S1), and truncated so a large error page cannot flood
+            # a log. A degraded-mode message the user cannot act on is barely better
+            # than a crash.
+            body = _redact(exc.response.text)[:config.ERROR_BODY_MAX_CHARS]
             raise httpx.HTTPStatusError(
-                _redact(str(exc)),
+                f"{_redact(str(exc))} — response body: {body}",
                 request=exc.request,
                 response=exc.response,
             ) from exc

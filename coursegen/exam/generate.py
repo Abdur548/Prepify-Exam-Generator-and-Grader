@@ -31,6 +31,7 @@ def generate_exam(
     blueprint_id: str,
     groundedness_scorer: GroundednessScorer | None = None,
     embedding_fn: Callable[[list[str]], list[list[float]]] | None = None,
+    span_source_by_id: dict[str, tuple[str, int]] | None = None,
 ) -> GenerationResult:
     """
     `blueprint_id` is required, not optional: R7 says a run_manifest must be enough
@@ -58,6 +59,7 @@ def generate_exam(
             items_by_slot[spec.slot_id] = cached
 
     raw_items = _call_batches(uncached_specs, span_text_by_id, llm_client)
+    _stamp_source_refs(raw_items, uncached_specs, span_source_by_id)
     valid, issues, gates = validate_generated_items(
         specs=uncached_specs,
         raw_items=raw_items,
@@ -76,6 +78,7 @@ def generate_exam(
         regeneration_passes = 1
         regen_specs = [s for s in uncached_specs if s.slot_id in set(flagged_slots)]
         regen_raw = _call_batches(regen_specs, span_text_by_id, llm_client)
+        _stamp_source_refs(regen_raw, regen_specs, span_source_by_id)
         regen_valid, regen_issues, regen_gates = validate_generated_items(
             specs=regen_specs,
             raw_items=regen_raw,
@@ -125,6 +128,16 @@ def generate_exam(
         "warnings": grounding_warnings,
         "regeneration_passes": regeneration_passes,
         "flagged_slots": flagged_slots,
+        # WHY each slot was dropped, not just which. `flagged_slots` names the
+        # casualties; without the gate and the measured score there is no way to
+        # tell a correctly-rejected hallucination from a good item lost to a
+        # threshold set too high — and GROUNDEDNESS_TAU is still provisional
+        # (see config). A run that silently loses a question should say what it
+        # measured, in the same artifact that claims the paper is valid.
+        "validation_issues": [
+            {"slot_id": i.slot_id, "gate": i.gate, "message": i.message[:config.ISSUE_MESSAGE_MAX_CHARS]}
+            for i in issues
+        ],
         "wall_clock_seconds": round(time.perf_counter() - start, 6),
     }
     (output_dir / "run_manifest.json").write_text(
@@ -153,6 +166,45 @@ def _call_batches(
     return raw_items
 
 
+def _stamp_source_refs(
+    raw_items: list[dict[str, Any]],
+    specs: list[ItemSpec],
+    span_source_by_id: dict[str, tuple[str, int]] | None,
+) -> None:
+    """Overwrite `source_ref` with the real file and pages, from code not the model.
+
+    The prompt shows the model `<source_span id="chunk_abc">` and nothing else
+    about provenance, so a model asked to fill `source_ref` can only echo the
+    delimiter id. On the first real run every one of the ten surviving items cited
+    a file that does not exist — 'source_span', 'source_span_c3f352fc' — with page
+    [1] throughout, while the real sources were 03_search.pdf, 06_CSP.pdf and the
+    rest. A citation that looks authoritative and is false is worse than none, and
+    in a study tool it is the difference between a student finding the material and
+    concluding their notes are wrong.
+
+    The system already holds this: the span id maps to the chunk's own source file
+    and page. Never ask a model to invent data you are holding.
+
+    Silently leaves the model's value alone when no map is supplied, so existing
+    callers and tests are unaffected — but production callers should always pass it.
+    """
+    if not span_source_by_id:
+        return
+    spec_by_slot = {s.slot_id: s for s in specs}
+    for raw in raw_items:
+        spec = spec_by_slot.get(str(raw.get("slot_id", "")))
+        if spec is None:
+            continue
+        refs = [span_source_by_id[sid] for sid in spec.span_ids if sid in span_source_by_id]
+        if not refs:
+            continue
+        # Spans of one item come from one node, hence one file; pages may differ.
+        raw["source_ref"] = {
+            "file": refs[0][0],
+            "pages": sorted({page for _, page in refs}),
+        }
+
+
 def _extract_items(response: dict[str, Any]) -> list[dict[str, Any]]:
     if "items" in response:
         return list(response["items"])
@@ -162,17 +214,43 @@ def _extract_items(response: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _response_schema() -> dict[str, Any]:
-    return {
+    """JSON schema for a batch of GeneratedItems.
+
+    `$defs` must be HOISTED to the root of the schema we send.
+
+    Pydantic does not inline nested models: `GeneratedItem` contains `MCQOption`
+    and `SourceRef`, so `model_json_schema()` factors them into `$defs` and points
+    at them with `{"$ref": "#/$defs/MCQOption"}`. The `#/` prefix means "from the
+    root of this schema document". Nesting that schema under
+    `properties.items.items` leaves its `$defs` two levels down while the refs
+    still resolve from the root, so every pointer dangles. The provider rejected
+    it with:
+
+        400 INVALID_ARGUMENT — reference to undefined schema at
+        properties.items.items.properties.options.anyOf.0.items
+
+    (`anyOf.0` because `options` is Optional, hence `array | null`.)
+
+    This was never caught because the mocked client accepts any `response_schema`
+    — it records the argument and returns canned data, so the schema had never
+    been validated by anything until the first live call.
+    """
+    item_schema = GeneratedItem.model_json_schema()
+    defs = item_schema.pop("$defs", {})
+    schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             "items": {
                 "type": "array",
-                "items": GeneratedItem.model_json_schema(),
+                "items": item_schema,
             }
         },
         "required": ["items"],
         "additionalProperties": False,
     }
+    if defs:
+        schema["$defs"] = defs
+    return schema
 
 
 def _read_cache(cache_dir: Path, spec_hash: str) -> GeneratedItem | None:

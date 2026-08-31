@@ -74,6 +74,28 @@ def _span_text_from_qdrant(chunk_ids: list[str], data_dir: Path) -> dict[str, st
     return {str(r.id): (r.payload or {}).get("text", "") for r in records}
 
 
+def _span_source_from_qdrant(chunk_ids: list[str], data_dir: Path) -> dict[str, tuple[str, int]]:
+    """Real file and page per span, so `source_ref` is built by code not invented.
+
+    The model only ever sees `<source_span id="...">`, so asked for a citation it
+    can only echo the id — which is exactly what happened on the first real run.
+    """
+    client = get_client(data_dir)
+    try:
+        records = client.retrieve(
+            collection_name=config.QDRANT_COLLECTION_NAME,
+            ids=chunk_ids,
+            with_payload=True,
+        )
+    finally:
+        client.close()
+    return {
+        str(r.id): ((r.payload or {}).get("source_file", "unknown"),
+                    int((r.payload or {}).get("page", 0)))
+        for r in records
+    }
+
+
 def _print_coverage(report, blueprint: Blueprint) -> None:
     print(f"\n{'=' * 72}\nCOVERAGE — decide here, before spending anything\n{'=' * 72}")
     print(f"  slots filled     {report.slots_filled}/{report.slots_total}"
@@ -170,6 +192,7 @@ def main() -> int:
 
     needed = sorted({sid for s in specs for sid in s.span_ids})
     span_text = _span_text_from_qdrant(needed, data_dir)
+    span_source = _span_source_from_qdrant(needed, data_dir)
     missing = [sid for sid in needed if not span_text.get(sid)]
     if missing:
         print(f"ERROR: {len(missing)} span(s) had no text in Qdrant, e.g. {missing[:3]}")
@@ -196,6 +219,7 @@ def main() -> int:
         blueprint_id=blueprint.blueprint_id,
         groundedness_scorer=groundedness,
         embedding_fn=None,
+        span_source_by_id=span_source,
     )
 
     m = result.manifest

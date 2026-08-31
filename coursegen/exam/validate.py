@@ -143,7 +143,7 @@ def validate_generated_items(
         if spec.grounding == "synthesis":
             record_not_applicable("groundedness")
         elif groundedness_scorer is not None:
-            score = groundedness_scorer(item.model_answer, source)
+            score = groundedness_scorer(_groundedness_claim(spec, item), source)
             if score < config.GROUNDEDNESS_TAU:
                 record("groundedness", False)
                 issues.append(ValidationIssue(
@@ -188,6 +188,37 @@ def validate_generated_items(
 # ---------------------------------------------------------------------------
 # Gate helpers
 # ---------------------------------------------------------------------------
+
+def _groundedness_claim(spec: ItemSpec, item: GeneratedItem) -> str:
+    """The text gate 2 scores against the source span.
+
+    Which text depends on the item type, because "the claim being made" lives in
+    a different field for different formats. For a written answer the content IS
+    the answer. For a selection item the answer is a LABEL — "True.", "A" — that
+    carries no content at all, and scoring it measures nothing.
+
+    Measured on a real 2,047-character span (2026-08-30):
+
+        form                                bare answer   stem + answer
+        true/false ("True.")                    -6.48         +5.52
+        correct concise prose                   +6.78         +7.18
+        HALLUCINATED claim                      -3.21         +2.92
+        unrelated topic                        -11.28        -11.28
+
+    This is why the whole TRUE_FALSE_SERIES section was destroyed on the first
+    real run: ten correct items scored like nonsense because their answers were
+    one word long.
+
+    Note the cost, and why the stem is NOT simply added for everything: it comes
+    from the span, so including it injects overlap regardless of whether the
+    answer is right, and it rescued the hallucination too (-3.21 → +2.92).
+    Bare-answer scoring discriminates roughly twice as well (9.99 apart vs 4.26),
+    so it is kept wherever the answer actually carries the content.
+    """
+    if spec.item_type == "mcq":
+        return f"{item.stem} {item.model_answer}"
+    return item.model_answer
+
 
 def _mcq_hygiene_issue(item: GeneratedItem) -> str | None:
     if item.options is None or item.correct_option is None:

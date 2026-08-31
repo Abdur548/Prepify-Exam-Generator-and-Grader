@@ -168,18 +168,60 @@ YAKE_TOP_N: int = 10
 # ---------------------------------------------------------------------------
 BATCH_SIZE: int = 6                  # item specs per LLM call
 # UNIT: raw cross-encoder logit from ms-marco-MiniLM-L-6-v2 (unbounded, roughly
-# -11 to +11), NOT a 0-1 similarity. STILL UNCALIBRATED — must be set from measured
-# logits before it means anything. Do not adjust it without measurement.
+# -11 to +11), NOT a 0-1 similarity.
+#
+# PROVISIONAL, raised from 0.45 on 2026-08-30 after the first real generation run.
+# 0.45 was a probability-shaped guess on a logit scale and it failed 20 of 22 real
+# items, destroying the entire TRUE_FALSE_SERIES section.
+#
+# Observed values (real run + a probe on a 2,047-char span):
+#
+#   grounded prose answers, real run      +4.44, +5.42
+#   correct concise prose, probe          +6.78
+#   correct true/false (stem + answer)    +5.52
+#   HALLUCINATED claim (stem + answer)    +2.92
+#   hallucinated prose (bare answer)      -3.21
+#   unrelated topic                      -11.28
+#
+# 3.5 is the value that admits every correct sample and rejects every incorrect
+# one. Be honest about how thin that is: the nearest correct sample sits 0.94
+# above it and the nearest incorrect one 0.58 below — ONE sample per category,
+# not a calibration. It needs a labelled set of grounded and hallucinated answers
+# over this corpus before it can be trusted; see todo.md.
 #
 # DO NOT COPY RERANKER_THRESHOLD (-2.0) HERE. Same model, different task, different
-# score distribution. RERANKER_THRESHOLD scores a QUESTION against a candidate chunk;
-# this scores a generated ANSWER against the span it was written from. An answer
-# derived from its own source is far more similar than a question is to a passage, so
-# grounded pairs will cluster much higher — a threshold borrowed from the retrieval
-# distribution would pass essentially everything and the gate would stop gating.
-# Calibrate it the same way: score genuinely-grounded answers against their spans,
-# score hallucinated answers against the same spans, and put the value between them.
-GROUNDEDNESS_TAU: float = 0.45
+# distribution: that one scores a QUESTION against a candidate chunk, this scores a
+# ---------------------------------------------------------------------------
+# DISPROVEN 2026-08-31. The instrument does not measure what this gate claims.
+#
+# ms-marco-MiniLM is a RELEVANCE reranker: it scores "would this passage be
+# retrieved for this query", NOT "does this passage support this claim". Those
+# come apart exactly where a groundedness gate has to work. Measured against one
+# real span that states verbatim "Optimal? Yes, if step cost = 1 (like BFS)":
+#
+#   TRUE,  verbatim in span   "IDS is optimal if step cost = 1"      +4.21
+#   TRUE,  verbatim in span   "IDS is slower than BFS"               +3.97
+#   TRUE,  verbatim in span   "IDS uses linear space"                -0.33
+#   FALSE, contradicts span   "IDS is faster, lower complexity"      +4.84  <-- highest of all
+#   FALSE, contradicts span   "IDS uses exponential space"           +2.24
+#   FALSE, invented fact      "IDS requires a reached structure"     -8.73
+#
+# TRUE spans -0.33..+4.21, FALSE spans -8.73..+4.84. The classes OVERLAP; the
+# top-scoring claim in the set is false. NO threshold separates them, so TAU is
+# not miscalibrated - it is unfalsifiable. The earlier one-sample-per-category
+# table that produced 3.5 was measuring topical overlap and reading it as truth.
+#
+# Cost of 3.5 on the first real paper: it deleted A-01, whose claim is verbatim
+# supported by its own span, while it would have PASSED the flat contradiction
+# above. It removes correct questions and supplies no factuality protection.
+#
+# The gate still reliably rejects OFF-TOPIC text (-8.73, -11.28), which is worth
+# keeping - as a relevance floor, under an honest name. Real factuality needs a
+# different instrument (an NLI/entailment model, or the LLM as verifier).
+# Until that lands, do not let the manifest report this as "groundedness".
+# ---------------------------------------------------------------------------
+GROUNDEDNESS_TAU: float = 3.5
+
 DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
 OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length
 # Base seed for MCQ option shuffling. It is combined with the item's slot_id per
@@ -347,7 +389,28 @@ CHAT_MAX_TURNS: int = 6              # L6: older turns dropped, never summarised
 # LLM client
 # ---------------------------------------------------------------------------
 GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-GEMINI_MODEL: str = "gemini-2.0-flash-lite"
+# Updated 2026-08-30 on the first real API call. `gemini-2.0-flash-lite` — pinned
+# since P0 and never once exercised, because every test mocks the client — has been
+# RETIRED. The provider returned:
+#   "This model models/gemini-2.0-flash-lite is no longer available. Please update
+#    your code to use models/gemini-3.5-flash-lite"
+#
+# UNVERIFIED, and it matters: PER_DAY_CALL_CAP and the whole ~250-exams/day estimate
+# come from §6's reading of the 2.0 Flash-Lite free tier (~15 RPM / ~1,000 RPD,
+# request-bound with effectively unbounded tokens). Nobody has checked whether 3.5
+# Flash-Lite has the same shape. If it is token-bound instead, §6's rationale for
+# choosing this provider stops holding — check the live quota page before relying on
+# the number, and before any demo.
+GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+# Cap on how much of a provider error body is quoted into an exception. The
+# body carries the only actionable diagnostic (see llm/client.py::_send), but a
+# large HTML error page must not flood a log or a degraded-mode message.
+ERROR_BODY_MAX_CHARS: int = 500
+
+# Cap on a single validation-issue message stored in the run manifest. Schema
+# errors from pydantic can run to thousands of characters; the manifest is a
+# diagnostic record, not a log sink.
+ISSUE_MESSAGE_MAX_CHARS: int = 300
 LLM_TIMEOUT_SECONDS: int = 120       # L7: generous but bounded
 MAX_RETRIES: int = 2                 # L1, R5: 1 original + 2 retries = 3 attempts
 RETRY_BASE_DELAY_SECONDS: float = 1.0
