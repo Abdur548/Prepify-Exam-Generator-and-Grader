@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prepify — Exam Generator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; min-height: 100vh; }
+  header { background: #1a1a2e; color: #fff; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: .02em; }
+  header span { font-size: .85rem; opacity: .7; }
+  .container { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+  .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1); padding: 1.5rem; }
+  .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #333; text-transform: uppercase; letter-spacing: .05em; }
+  label { display: block; font-size: .85rem; color: #555; margin-bottom: .3rem; margin-top: .7rem; }
+  input[type=text], select { width: 100%; padding: .5rem .75rem; border: 1px solid #ccc; border-radius: 6px; font-size: .95rem; }
+  input[type=file] { font-size: .9rem; }
+  button { cursor: pointer; border: none; border-radius: 6px; padding: .55rem 1.2rem; font-size: .9rem; font-weight: 600; transition: opacity .15s; }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-success { background: #16a34a; color: #fff; }
+  .btn-warn   { background: #f59e0b; color: #fff; }
+  .status { font-size: .85rem; margin-top: .75rem; padding: .5rem .8rem; border-radius: 6px; }
+  .status.ok   { background: #dcfce7; color: #14532d; }
+  .status.err  { background: #fee2e2; color: #7f1d1d; }
+  .status.info { background: #dbeafe; color: #1e3a8a; }
+  .status.warn { background: #fef9c3; color: #713f12; }
+  .downloads a { display: inline-block; margin: .3rem .4rem .3rem 0; padding: .4rem .9rem; background: #f3f4f6; border-radius: 6px; text-decoration: none; font-size: .85rem; color: #2563eb; border: 1px solid #d1d5db; }
+  .downloads a:hover { background: #e5e7eb; }
+  #disclosure-banner { background: #fef3c7; border: 1px solid #fbbf24; border-radius: 8px; padding: 1rem 1.2rem; }
+  #disclosure-banner p { font-size: .9rem; line-height: 1.5; color: #78350f; }
+  #disclosure-banner .actions { margin-top: .75rem; display: flex; gap: .75rem; align-items: center; }
+  .tabs { display: flex; border-bottom: 2px solid #e5e7eb; margin-bottom: 1.2rem; }
+  .tab { padding: .5rem 1rem; cursor: pointer; font-size: .9rem; font-weight: 500; color: #6b7280; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s; }
+  .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  #chat-history { min-height: 120px; max-height: 340px; overflow-y: auto; padding: .5rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: .9rem; }
+  .chat-msg { margin-bottom: .7rem; }
+  .chat-msg .role { font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .2rem; }
+  .chat-msg.user .role { color: #2563eb; }
+  .chat-msg.assistant .role { color: #16a34a; }
+  .chat-msg .text { white-space: pre-wrap; line-height: 1.5; }
+  .citation { font-size: .78rem; color: #6b7280; margin-top: .25rem; }
+  .chat-input-row { display: flex; gap: .5rem; margin-top: .75rem; }
+  .chat-input-row input { flex: 1; }
+  .preflight-table { width: 100%; font-size: .85rem; border-collapse: collapse; }
+  .preflight-table td { padding: .35rem .5rem; border-bottom: 1px solid #f3f4f6; }
+  .preflight-table .check-ok  { color: #16a34a; font-weight: 600; }
+  .preflight-table .check-err { color: #dc2626; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ccc; border-top-color: #3b82f6; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: .4rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #coverage-summary { font-size: .85rem; }
+  #coverage-summary table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  #coverage-summary td, #coverage-summary th { padding: .3rem .6rem; border: 1px solid #e5e7eb; }
+  #coverage-summary th { background: #f9fafb; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Prepify</h1>
+  <span>Exam Generator — local, offline</span>
+</header>
+
+<!-- Disclosure banner (S7) — hidden once accepted -->
+<div class="container">
+  <div id="disclosure-banner">
+    <p><strong>Before you continue:</strong> Prepify generates exam questions from your uploaded course material using a large language model. Generated questions must be reviewed by a qualified educator before use in any graded assessment. This tool is a teaching aid — it does not replace instructor judgment. Generated content may contain errors.</p>
+    <div class="actions">
+      <button class="btn-warn" id="btn-accept-disclosure">I understand — continue</button>
+      <span id="disclosure-status" style="font-size:.85rem;color:#92400e;"></span>
+    </div>
+  </div>
+
+  <!-- Main workflow (hidden until disclosure accepted) -->
+  <div id="main-workflow" style="display:none; flex-direction:column; gap:1.5rem;">
+
+    <!-- Tab bar -->
+    <div class="tabs">
+      <div class="tab active" data-tab="generate">Generate Exam</div>
+      <div class="tab" data-tab="chat">Chat</div>
+      <div class="tab" data-tab="preflight">System Status</div>
+    </div>
+
+    <!-- Generate tab -->
+    <div class="tab-content active" id="tab-generate">
+
+      <!-- Step 1: Upload -->
+      <div class="card">
+        <h2>Step 1 — Upload Course Material</h2>
+        <label>Select files (PDF, PPTX, DOCX):</label>
+        <input type="file" id="upload-files" multiple accept=".pdf,.pptx,.ppt,.docx">
+        <br><br>
+        <button class="btn-primary" id="btn-ingest">Upload &amp; Ingest</button>
+        <div id="ingest-status"></div>
+      </div>
+
+      <!-- Step 2: Generate -->
+      <div class="card">
+        <h2>Step 2 — Generate Exam</h2>
+        <label>Blueprint:</label>
+        <select id="blueprint-select"><option value="">Loading…</option></select>
+        <label>Exam title:</label>
+        <input type="text" id="exam-title" placeholder="e.g. COMP3410 Mid-Semester Exam 2026">
+        <br><br>
+        <button class="btn-success" id="btn-generate">Generate Exam</button>
+        <div id="generate-status"></div>
+
+        <div id="downloads" class="downloads" style="margin-top:1rem;display:none;">
+          <strong style="font-size:.85rem;">Download:</strong><br>
+          <a id="dl-exam-html" href="#">Exam (HTML)</a>
+          <a id="dl-key-html" href="#">Answer Key (HTML)</a>
+          <a id="dl-coverage-html" href="#">Coverage Report</a>
+          <a id="dl-exam-pdf" href="#">Exam (PDF)</a>
+          <a id="dl-key-pdf" href="#">Answer Key (PDF)</a>
+        </div>
+
+        <div id="coverage-summary" style="margin-top:1rem;display:none;"></div>
+      </div>
+
+    </div><!-- /tab-generate -->
+
+    <!-- Chat tab -->
+    <div class="tab-content" id="tab-chat">
+      <div class="card">
+        <h2>Chat with your material</h2>
+        <div id="chat-history"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="Ask a question about the uploaded material…" autocomplete="off">
+          <button class="btn-primary" id="btn-chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preflight tab -->
+    <div class="tab-content" id="tab-preflight">
+      <div class="card">
+        <h2>System Status</h2>
+        <button class="btn-primary" id="btn-check-preflight" style="margin-bottom:.75rem;">Refresh</button>
+        <table class="preflight-table" id="preflight-table">
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main-workflow -->
+</div><!-- /container -->
+
+<script>
+const API = '';
+
+// ---- Disclosure ----
+const banner = document.getElementById('disclosure-banner');
+const workflow = document.getElementById('main-workflow');
+document.getElementById('btn-accept-disclosure').onclick = async () => {
+  const r = await fetch(`${API}/api/disclosure/accept`, { method: 'POST' });
+  if (r.ok) {
+    banner.style.display = 'none';
+    workflow.style.display = 'flex';
+    loadBlueprints();
+    loadPreflight();
+  }
+};
+
+// ---- Tabs ----
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+    if (tab.dataset.tab === 'preflight') loadPreflight();
+  };
+});
+
+// ---- Helpers ----
+function setStatus(id, msg, type) {
+  const el = document.getElementById(id);
+  el.className = `status ${type}`;
+  el.innerHTML = msg;
+}
+
+function spinner() {
+  return '<span class="spinner"></span>';
+}
+
+// ---- Blueprints ----
+async function loadBlueprints() {
+  const sel = document.getElementById('blueprint-select');
+  try {
+    const r = await fetch(`${API}/api/blueprints`);
+    const ids = await r.json();
+    sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+  } catch {
+    sel.innerHTML = '<option value="">Failed to load</option>';
+  }
+}
+
+// ---- Ingest ----
+document.getElementById('btn-ingest').onclick = async () => {
+  const files = document.getElementById('upload-files').files;
+  if (!files.length) { setStatus('ingest-status', 'Select at least one file.', 'err'); return; }
+  setStatus('ingest-status', `${spinner()}Ingesting ${files.length} file(s)…`, 'info');
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  try {
+    const r = await fetch(`${API}/api/ingest`, { method: 'POST', body: fd });
+    const body = await r.json();
+    if (r.ok) {
+      setStatus('ingest-status', `Ingested ${body.nodes_ingested} section(s).`, 'ok');
+    } else {
+      setStatus('ingest-status', `Error: ${JSON.stringify(body)}`, 'err');
+    }
+  } catch (e) {
+    setStatus('ingest-status', `Network error: ${e}`, 'err');
+  }
+};
+
+// ---- Generate ----
+document.getElementById('btn-generate').onclick = async () => {
+  const blueprint_id = document.getElementById('blueprint-select').value;
+  const title = document.getElementById('exam-title').value.trim() || 'Exam';
+  setStatus('generate-status', `${spinner()}Generating — this may take a minute…`, 'info');
+  document.getElementById('downloads').style.display = 'none';
+  document.getElementById('coverage-summary').style.display = 'none';
+  try {
+    const r = await fetch(`${API}/api/exam`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blueprint_id, title }),
+    });
+    const body = await r.json();
+    if (body.status === 'ok') {
+      const dl = body.downloads || {};
+      setStatus('generate-status',
+        `Done — ${body.items_count} item(s), fill ${(body.fill_ratio*100).toFixed(0)}%, ` +
+        `coverage ${(body.coverage_ratio*100).toFixed(0)}%`, 'ok');
+      const dls = document.getElementById('downloads');
+      dls.style.display = 'block';
+      document.getElementById('dl-exam-html').href = dl.exam_html || '#';
+      document.getElementById('dl-key-html').href = dl.answer_key_html || '#';
+      document.getElementById('dl-coverage-html').href = dl.coverage_html || '#';
+      document.getElementById('dl-exam-pdf').href = dl.exam_pdf || '#';
+      document.getElementById('dl-key-pdf').href = dl.answer_key_pdf || '#';
+      // Coverage summary
+      const cs = document.getElementById('coverage-summary');
+      cs.style.display = 'block';
+      cs.innerHTML = `
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Coverage ratio</td><td>${(body.coverage_ratio*100).toFixed(1)}%</td></tr>
+          <tr><td>Fill ratio</td><td>${(body.fill_ratio*100).toFixed(1)}%</td></tr>
+          <tr><td>Allocation fidelity</td><td>${(body.allocation_fidelity*100).toFixed(1)}%</td></tr>
+          <tr><td>Items</td><td>${body.items_count}</td></tr>
+        </table>
+        ${body.warnings && body.warnings.length ? '<p style="color:#92400e;margin-top:.5rem;font-size:.82rem;">Warnings: ' + body.warnings.join('; ') + '</p>' : ''}
+      `;
+    } else {
+      const warn = (body.warnings || []).join('; ') || 'Generation degraded.';
+      setStatus('generate-status', `Degraded: ${warn}`, 'warn');
+    }
+  } catch (e) {
+    setStatus('generate-status', `Network error: ${e}`, 'err');
+  }
+};
+
+// ---- Chat ----
+const chatHistory = [];
+
+document.getElementById('btn-chat-send').onclick = sendChat;
+document.getElementById('chat-input').onkeydown = e => { if (e.key === 'Enter') sendChat(); };
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const query = input.value.trim();
+  if (!query) return;
+  input.value = '';
+  appendChat('user', query, [], true);
+  const historyPayload = chatHistory.slice(-6).map(m => [m.role === 'user' ? m.text : '', m.role === 'assistant' ? m.text : '']).filter(p => p[0] || p[1]);
+  try {
+    const r = await fetch(`${API}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, history: historyPayload }),
+    });
+    const body = await r.json();
+    appendChat('assistant', body.answer, body.citations || [], body.from_material);
+  } catch (e) {
+    appendChat('assistant', `Error: ${e}`, [], false);
+  }
+}
+
+function appendChat(role, text, citations, fromMaterial) {
+  chatHistory.push({ role, text });
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
+  const label = role === 'user' ? 'You' : 'Prepify';
+  const citHtml = citations && citations.length
+    ? '<div class="citation">Source: ' + citations.map(c => `${c.file} p.${c.page}`).join(', ') + '</div>'
+    : (role === 'assistant' && !fromMaterial ? '<div class="citation" style="color:#dc2626">Not from uploaded material</div>' : '');
+  div.innerHTML = `<div class="role">${label}</div><div class="text">${escHtml(text)}</div>${citHtml}`;
+  const hist = document.getElementById('chat-history');
+  hist.appendChild(div);
+  hist.scrollTop = hist.scrollHeight;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---- Preflight ----
+async function loadPreflight() {
+  const tbody = document.querySelector('#preflight-table tbody');
+  tbody.innerHTML = '<tr><td colspan="2"><span class="spinner"></span> Checking…</td></tr>';
+  try {
+    const r = await fetch(`${API}/api/preflight`);
+    const body = await r.json();
+    tbody.innerHTML = Object.entries(body).map(([k, v]) => {
+      const ok = v === 'ok';
+      return `<tr><td>${k}</td><td class="${ok ? 'check-ok' : 'check-err'}">${escHtml(v)}</td></tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="2" style="color:red">Failed: ${e}</td></tr>`;
+  }
+}
+
+document.getElementById('btn-check-preflight').onclick = loadPreflight;
+</script>
+</body>
+</html>

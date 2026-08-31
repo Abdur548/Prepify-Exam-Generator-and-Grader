@@ -12,7 +12,7 @@
 | P3 | Generation + validation | PASS | `pytest tests/test_p3_generation_validation.py -v` | 2026-08-28 |
 | P4 | Render + chat | **PASS** | `pytest tests/test_p4_render_chat.py -q` 13 passed; `weasyprint 69.0` imports and renders a real PDF (`%PDF-1.7`, 5,166 bytes). GTK blocker resolved; the first live run wrote exam.pdf + answer_key.pdf | 2026-09-01 |
 | P1 | Ingest fixes — `.ppt`, `.docx`, chunk page precision | PASS | `python -m pytest` (211) + `python -m coursegen --dry-run`; P1 idempotency + point-count gates re-verified | 2026-08-28 |
-| P5 | UI + resilience | PARTIAL | `pytest tests/test_p5_app.py` 14/14 PASS; browser end-to-end gate pending pipeline wiring | 2026-08-30 |
+| P5 | UI + resilience | PARTIAL | `python -m pytest` 383 passed; pipeline and chat wired, lifespan replaces `on_event`, static UI + 4 endpoints added. **Not PASS:** the two gates P5 declares - browser end-to-end (upload -> ingest -> generate -> download -> chat) and network-killed-mid-generation - are not implemented, and 383 unit tests with every stage mocked is not that gate | 2026-09-01 |
 | A01 | Stage 1 fix — topic→node rule replaced with matched IDF mass | PASS | `python -m pytest` (356) + `python -m coursegen --dry-run`; 3/3 mutations caught; shipped blueprints byte-identical vs `ebc6c1b`. **Unblocks stage 4** | 2026-08-30 |
 | — | First real exam generation (live model, real corpus) | PASS | `python -m pytest` (375) + `python tests/verify_exam.py`; 20/20 items, 100/100 marks, 4 calls | 2026-09-01 |
 | — | Gate 2 disproven → demoted to relevance floor | PASS | `python -m pytest` (375); mutation-tested | 2026-09-01 |

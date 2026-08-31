@@ -829,18 +829,55 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
-## P5 — UI + resilience  [PARTIAL — code tests PASS 2026-08-30; pipeline wiring pending]
+## P5 — UI + resilience  [PARTIAL — wiring COMPLETE 2026-09-01, 385 tests pass; the two declared gates are still not implemented]
 
 - [x] `app/preflight.py` — R8 pre-flight check for API key, output dir, WeasyPrint, Qdrant.
 - [x] `app/main.py` — FastAPI app skeleton; S7 disclosure gate; degraded mode for
       `BudgetExceeded` and `TimeoutException`; no stack traces in responses.
 - [x] `tests/test_p5_app.py` — 14 TDD tests covering preflight, disclosure, degraded mode, chat.
-- [ ] Wire `_run_exam_pipeline` to real ingest → allocate → generate → render stages.
-- [ ] Wire `_run_chat_query` to real retrieve → rerank → answer_question path.
-- [ ] Build static HTML UI: upload form, progress view, download links, chat tab.
-- [ ] Browser end-to-end gate: upload → ingest → generate → download → chat.
-- [ ] Integration test: network killed mid-generation → degraded JSON shown in browser.
-- [ ] Fix `@app.on_event("startup")` deprecation to `lifespan` pattern.
+- [x] Wire `_run_exam_pipeline` to real load → solve → generate → render stages (2026-09-01).
+      Verified against real signatures rather than mocks alone: `load_course_map()` with no
+      args is valid (`path` defaults to `None`), `render_exam_artifacts` matches, and every
+      `CoverageReport` field the route reads exists.
+- [x] Wire `_run_chat_query` to real retrieve → rerank → answer_question path (2026-09-01).
+- [x] Build static HTML UI: upload form, progress view, download links, chat tab (2026-09-01).
+- [x] Fix `@app.on_event("startup")` deprecation to `lifespan` pattern (2026-09-01).
+- [ ] **Browser end-to-end gate: upload → ingest → generate → download → chat.** NOT DONE.
+      No browser test exists anywhere in `tests/`. This is the gate P5 declared, and 385
+      unit tests with every stage mocked is not it — that is precisely how
+      `show_progress_bar` survived four days of green tests while the real embedding path
+      had never once executed.
+- [ ] **Integration test: network killed mid-generation → degraded JSON shown in browser.**
+      NOT DONE. `test_network_error_during_generation_returns_degraded_not_500` patches the
+      `_run_exam_pipeline` seam to raise, which tests the route's except clause, not a
+      network failure partway through a real run. A real one lets the pipeline start and
+      has the LLM client raise `ConnectError` on the second batch.
+
+### Corrections applied to the P5 wiring — 2026-09-01
+
+- [x] **`/api/exam` turned every crash into HTTP 200 `"degraded"`.** With no pipeline at all
+      it returned 200 with `fill_ratio: 0.0`. `degraded` means "we ran and hit a known
+      limit"; the two states R8 specifies (`BudgetExceeded`, `TimeoutException`) keep their
+      200s. Anything else is now a 500, traceback logged and never sent (R4).
+      Mutation-tested: reverting it to a degraded 200 fails the new test.
+- [x] **`status: "ok"` was a hardcoded literal.** A run rendering zero items reported `ok`.
+      Now derived — `"ok" if result.items else "empty"`. The test that asserted a zero-item
+      paper was `ok` has been corrected, and a populated-path test added, since nothing
+      previously exercised `"ok"` at all.
+- [x] **Generation was unserialised against a single shared `OUTPUT_DIR`.** Two overlapping
+      runs interleaved into the same `output/` and `output/cache/`, and `/api/files/{name}`
+      then served whichever won. Now behind `_PIPELINE_LOCK`. Sufficient because S8 already
+      pins this to one worker; if it ever serves concurrent users the fix is per-run output
+      directories with run-scoped download URLs.
+- [x] **12 test literals matched the secret-scanning pattern.** `"AIza" + 35 chars` trips
+      `_KEY_RE` and GitHub push protection. Replaced with `_TEST_API_KEY`.
+      `test_p0_client.py` keeps a realistic-shaped key on purpose — it asserts redaction
+      catches one.
+- [ ] **🟠 `coverage_ratio` is now user-facing and answers the wrong question.** It reported
+      **0.04 for a 100%-complete paper**, because it measures against the whole corpus while
+      an authored blueprint asks for five specific topics. It is in the `/api/exam` response
+      and on the UI. Already queued as "decide before P6" — P5 puts it on a student's screen
+      first, so it needs deciding sooner.
 
 ### Blocking P5 — found during the first real run, 2026-09-01
 
