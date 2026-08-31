@@ -221,9 +221,17 @@ tune it by watching the demo.
 - **Output:** `list[GeneratedItem]`, cache files keyed by `spec_hash`, `run_manifest.json`
 - **Modules:** `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`
 - **LLM calls:** batches of `BATCH_SIZE = 6` uncached item specs per call; cached `spec_hash` hits cost zero calls
-- **Key parameters:** `MAX_REGENERATION_PASSES = 1`, `GROUNDEDNESS_TAU = 0.45` (raw cross-encoder logit, uncalibrated), `DEDUP_TAU = 0.85`, `OPTION_LENGTH_BAND = 0.40`, `MCQ_SHUFFLE_SEED = 42`
+- **Key parameters:** `MAX_REGENERATION_PASSES = 1`, `RELEVANCE_FLOOR = -2.0` (raw cross-encoder logit; see gate 2 below — this is a relevance floor, NOT a factuality check), `DEDUP_TAU = 0.85`, `OPTION_LENGTH_BAND = 0.40`, `MCQ_SHUFFLE_SEED = 42`
 - **Prompt-injection control:** every source span is wrapped in `<source_span id="...">...</source_span>` and the stable system prompt says source spans are data, never instructions (S2)
-- **Validation gates:** Pydantic schema parse, groundedness score, duplication cosine, MCQ hygiene. Failures regenerate only their slots, capped at one regeneration pass; remaining failures are shipped flagged in `run_manifest.json`.
+- **Validation gates:** Pydantic schema parse, **relevance** score, duplication cosine, MCQ hygiene. Failures regenerate only their slots, capped at one regeneration pass; remaining failures are shipped flagged in `run_manifest.json`, each with the gate and measured score that rejected it (`validation_issues`).
+- **Gate 2 is a relevance floor, not a groundedness check** (renamed 2026-09-01). The reranker
+  behind it scores topical relevance, and measurement on real spans showed it cannot separate a
+  true claim from a false one about the same span — true claims scored −0.33..+4.21, false
+  claims −8.73..+4.84, the highest-scoring claim of the set being false. It reliably rejects
+  text that is not about the source at all, and that is all it is asked to do.
+  **Nothing in this pipeline verifies that a question is true.** Any statement to a student
+  that items are "grounded in" or "verified against" their material would be false today.
+  Full evidence table sits above `RELEVANCE_FLOOR` in `config.py`.
 - **Gate execution is recorded, not inferred.** `validate_generated_items` returns a per-gate
   `{evaluated, passed, failed, skipped, not_applicable}` record, and the manifest carries it
   verbatim. The groundedness and duplication gates depend on an injected scorer and embedder so
@@ -237,7 +245,7 @@ tune it by watching the demo.
   nothing to check against" are not the same thing, and collapsing them would hide the second,
   which is the more important one.
 - **Grounding mode (`ItemSpec.grounding`, Amendment 01 §6.4).** `"span"` is the default and the
-  existing product: the item is written FROM its span and gate 2 scores the answer against it.
+  existing product: the item is written FROM its span and gate 2 scores it for relevance to that span.
   `"synthesis"` means the model INVENTS the artifact — a novel game tree, a novel word problem —
   with the span as context. Gate 2 records a synthesis item as `not_applicable`: it must not fail
   it (the blueprint asked for exactly this) and must not pass it either (nothing was checked).
@@ -289,6 +297,13 @@ tune it by watching the demo.
 
 ### UI
 - **Status:** not started (P5)
+
+- **`source_ref` is built by code, never by the model.** The prompt shows only
+  `<source_span id="chunk_abc">`, so a model asked to cite its source can only echo the
+  delimiter id — which is exactly what the first real run produced, every item citing
+  `'source_span'` at page `[1]`. `_stamp_source_refs()` writes the real file and pages from
+  the chunk's own Qdrant payload before validation, on both the initial and the regeneration
+  batch, and `source_ref` is absent from the response schema.
 
 ## Data contracts in use
 
@@ -529,3 +544,5 @@ Hashing code lands in `ingest/coursemap.py` at P1.
 | 2026-08-29 | uncommitted | `SectionSpec.topic` (optional), topic→node matching in `exam/allocate.py`, topic filter beside the flag filter, `TopicCoverage` + `CoverageReport.per_topic`, `TOPIC_MATCH_MIN_TOKEN_LEN` / `TOPIC_MATCH_MIN_SCORE` | Spec Amendment 01 option C, signed 2026-08-28: an authored blueprint sets across-topic weights by hand while the solver still allocates within topic from the student's own material, and says so loudly when the material does not cover a topic. `topic is None` **is** the derived path — `solve()` byte-identical on all three shipped blueprints, all 213 prior tests unmodified | Amendment 01 stage 1 |
 | 2026-08-30 | uncommitted | `SectionSpec`/`ItemSpec` gain `grounding` (`span`\|`synthesis`) and `generation_instructions`; both join `spec_hash` **only when non-default**; gate 2 records synthesis items as `not_applicable` rather than passing or failing them; `run_manifest.json` gains `grounding.{synthesis_items, items_total, synthesis_ratio}` + `warnings` past `SYNTHESIS_ITEM_WARN_RATIO = 0.25`; `group_id` removed from the LLM prompt | Amendment 01 §6.4/§6.6. Some exam items legitimately require synthesis (a novel game tree), and gate 2 cannot score what has no source span — but an ungrounded question is not studiable from the upload, so the COUNT has to be visible rather than inferable. `group_id` was excluded from `spec_hash` yet reaching the prompt, so prompt text could vary while the cache key did not. `solve()` byte-identical on all three shipped blueprints, all 314 prior tests unmodified | Amendment 01 stage 3 |
 | 2026-08-30 | uncommitted | Topic→node score replaced: `\|topic ∩ node\| / \|topic\|` → **matched IDF mass** `Σ idf(t)` over the shared tokens, `idf(t) = ln((N+1)/(df(t)+1)) + 1`. `TOPIC_MATCH_MIN_SCORE` removed; admission becomes `TOPIC_MATCH_RELATIVE_FLOOR = 0.5` of the section's best match **and** `TOPIC_MATCH_MIN_EVIDENCE = 1.5` absolute. `TopicCoverage.best_score` changes SCALE (unbounded IDF mass, not a 0–1 fraction) | The old rule **punished specificity**: on the fixture `"Search"` scored 1.000 and matched while `"Uninformed and Informed Search (BFS, DFS, A*, Heuristics)"` — the same topic, phrased precisely — scored 0.286 and matched nothing, because every enumerated term the node lacked sat in the denominator. Every topic in `template_ai_fundamentals_v1` has that shape, so stage 4 could not work. IDF-weighting the fraction was measured and rejected (0.286 → 0.262, worse). New scores: 3.351 and 6.703. Relative floor because idf scales with `N`; absolute floor because a relative rule always admits the argmax. **No fallback preserved** — an unmatched topic still leaves its slots unfilled. `solve()` byte-identical on all three shipped blueprints (`ItemSpec[]`, `spec_hash` and `CoverageReport`), verified against a `git archive` of `ebc6c1b` in a separate process | Amendment 01 stage 1 fix |
+| 2026-09-01 | be71ee2 | `source_ref` stamped by `_stamp_source_refs()` from the chunk's Qdrant payload and REMOVED from the response schema; `$defs` hoisted to the schema root; gate 2 claim made item-type aware (`stem + answer` for mcq, bare answer otherwise); provider response body included in `HTTPStatusError`; `run_manifest.json` gains `validation_issues` | First live run against a real course. The model was asked to fill `source_ref` while the prompt showed it only `<source_span id="chunk_abc">`, so all ten surviving items cited `'source_span'` at page `[1]` against real files named `03_search.pdf` — never ask a model to invent data you are holding. Nested `$defs` left every `#/$defs/...` pointer dangling (HTTP 400). Gate 2 scored one-word labels (`"T"`, `"False"`) against lecture slides and destroyed the entire TRUE_FALSE_SERIES section, 10 items. `validation_issues` records the gate and measured score behind each dropped slot, which is what exposed the row below | First real generation |
+| 2026-09-01 | f85aed4 | Gate 2 renamed `groundedness` → **`relevance`** end to end (gate key, `ValidationIssue.gate`); `GROUNDEDNESS_TAU = 3.5` → `RELEVANCE_FLOOR = -2.0`; the "same model, different task" warning on `RERANKER_THRESHOLD` retired | The reranker is a RELEVANCE model and cannot separate true from false claims about the same span: measured on one real span, true claims scored −0.33..+4.21 and false claims −8.73..+4.84, **the top scorer being false**. The classes overlap, so the threshold was unfalsifiable rather than miscalibrated — and at 3.5 it deleted an item whose claim was verbatim in its own span while it would have passed a flat contradiction of that span. Demoted to what the model does measure. The floor matches `RERANKER_THRESHOLD` on purpose now: it is the same task. **Nothing in the pipeline verifies factuality any more, and nothing may claim to** until an NLI/entailment model or an LLM verifier lands | Gate 2 disproof |

@@ -575,7 +575,11 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
       relative rule always admits the argmax). Stage 4 is unblocked.
 - [ ] **Calibrate `TOPIC_MATCH_RELATIVE_FLOOR` and `TOPIC_MATCH_MIN_EVIDENCE` against the real
       AI course deck when it arrives.** Both are **UNCALIBRATED** — reasoned, not measured, same
-      class as `GROUNDEDNESS_TAU` and `RERANKER_THRESHOLD`. **Do not tune either against
+      class as `RERANKER_THRESHOLD` (and as the former `GROUNDEDNESS_TAU`, which turned out not
+      to be calibratable at all: the signal underneath it did not measure what the gate claimed,
+      so no threshold existed. **Before calibrating either of these, confirm the score actually
+      separates the classes you care about** — a threshold can only be as meaningful as the
+      signal beneath it, and reasoning about a distribution is not measuring it). **Do not tune either against
       `tests/fixtures/course_map_sample.json`:** it is a generic CS syllabus, not the real deck,
       and a number fitted to it would look measured while meaning nothing.
       What the fixture *can* say, recorded as evidence for the calibration rather than as a
@@ -833,6 +837,26 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] Integration test: network killed mid-generation → degraded JSON shown in browser.
 - [ ] Fix `@app.on_event("startup")` deprecation to `lifespan` pattern.
 
+### Blocking P5 — found during the first real run, 2026-09-01
+
+- [ ] **🔴 `output/` has no write lock, and P5 makes concurrent runs normal.** A manifest was
+      observed describing a different paper than the artifacts beside it (claiming
+      `mcq_hygiene: 8` and flagging A-05, while the PDFs contained 9 MCQs including A-05)
+      because a second process wrote into `output/` mid-run. A clean re-run showed console
+      and disk agreeing exactly, so this is not a reporting bug. Qdrant's file lock protects
+      ingest; generation is unprotected. Today it takes two terminals to hit this. Behind a
+      web request it is the default case: two users, or one impatient user clicking twice,
+      corrupt each other's papers. **Per-run output directories, or a lock, before wiring
+      `_run_exam_pipeline`.**
+- [ ] **🟠 `_span_source_from_qdrant` lives in `tests/run_exam.py` and P5 needs it.** Real
+      citations depend on reading `source_file` / `page` back from the chunk payload. That
+      read path belongs in `ingest/index.py` alongside `_span_text_from_qdrant`; both are
+      currently squatting in a test-directory script that P5 is meant to replace.
+- [ ] **🟠 Decide what the UI says about grounding.** Gate 2 no longer claims to verify
+      facts (see below). The UI must not tell a student their questions are "verified
+      against your material" — currently nothing in the pipeline checks that. Copy needs
+      writing against what the system actually does.
+
 ---
 
 ## Spec Amendment 01 — stage 4 (the AI blueprint)  [COMPLETE 2026-08-30 — amendment finished]
@@ -861,14 +885,16 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ### The real test has not happened yet
 
-- [ ] **Match the five topic strings against a REAL lecture deck.** Everything above is against
-      fixtures. If the deck's headings read "Lecture 4" or "Week 6 — Games" rather than
-      "Adversarial Search", the topics will match nothing — which the report will say loudly,
-      but which means the blueprint's topic strings need to be written against the actual
-      material.
+- [x] **DONE 2026-08-30 — all five topics matched the real decks.** 52 / 11 / 19 / 5 / 10
+      nodes, best scores 8.56–20.90 against an evidence floor of 1.5. The feared failure
+      (headings reading "Lecture 4" rather than "Adversarial Search") did not occur on this
+      corpus; it remains a risk for any deck that names lectures by number.
 - [ ] **Calibrate `TOPIC_MATCH_RELATIVE_FLOOR` and `TOPIC_MATCH_MIN_EVIDENCE`** on that deck.
       Both ship uncalibrated and were deliberately not tuned against fixtures.
-- [ ] **Generate one exam with a real model.** No live call has ever been made.
+- [x] **DONE 2026-09-01 — the first live run produced a complete paper.** 20/20 items,
+      100/100 marks, 4 calls, 15,779 tokens, zero regeneration passes. Four defects had to
+      be cleared first (retired model, dangling `$ref`, fabricated citations, the
+      True/False section destroyed by gate 2). Evidence in `progress.md`.
 
 ---
 
@@ -890,6 +916,13 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] **🔴 Add an opt-in test that runs the REAL embedder** on two or three chunks, marked like
       `--live` so it stays out of the default run. "The model actually runs" is currently proven
       nowhere, and that is how the above survived four days and 375 green tests.
+- [ ] **🔴 Audit fixtures that encode a threshold's current value.** Changing
+      `RELEVANCE_FLOOR` silently converted `test_groundedness_gate_flags_low_score` into a
+      test that asserted nothing: its −1.0 fixture was a rejection at TAU=3.5 and a pass at
+      −2.0. It surfaced only by luck, failing on an unrelated rename. Any test whose fixture
+      sits near a constant has the same failure mode — it goes green while checking nothing.
+      Sweep for fixtures chosen relative to `DEDUP_TAU`, `RERANKER_THRESHOLD`,
+      `OPTION_LENGTH_BAND`, `TOPIC_MATCH_*`, and mutation-test each one.
 - [ ] **🟠 `coverage_ratio` answers the wrong question under an authored blueprint.** It reported
       **0.04** — 20 nodes of 571 — because it measures against the whole corpus while the
       blueprint asked for five specific topics. Arithmetically correct, practically meaningless,
