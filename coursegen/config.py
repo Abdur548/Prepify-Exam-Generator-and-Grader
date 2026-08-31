@@ -218,9 +218,18 @@ BATCH_SIZE: int = 6                  # item specs per LLM call
 # The gate still reliably rejects OFF-TOPIC text (-8.73, -11.28), which is worth
 # keeping - as a relevance floor, under an honest name. Real factuality needs a
 # different instrument (an NLI/entailment model, or the LLM as verifier).
-# Until that lands, do not let the manifest report this as "groundedness".
+# Until that lands, nothing here may be reported as "groundedness".
 # ---------------------------------------------------------------------------
-GROUNDEDNESS_TAU: float = 3.5
+# Demoted to a RELEVANCE FLOOR on 2026-09-01 after the disproof above. This gate
+# no longer claims to check factuality; it rejects text that is not about the
+# source at all, which is the one thing the reranker measures reliably.
+#
+# -2.0 matches RERANKER_THRESHOLD deliberately, and the old "same model,
+# different task" warning no longer applies: the task IS retrieval relevance now,
+# the same one the reranker was calibrated for. Kept as a separate constant
+# because the two are free to diverge - this one guards a generated claim, that
+# one ranks candidate spans.
+RELEVANCE_FLOOR: float = -2.0
 
 DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
 OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length

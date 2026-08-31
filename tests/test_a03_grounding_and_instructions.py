@@ -436,7 +436,7 @@ class TestGateTwoNotApplicable:
     def test_every_gate_starts_with_a_not_applicable_counter(self) -> None:
         report = new_gate_report()
         assert set(report) == {
-            "schema", "groundedness", "duplication", "mcq_hygiene"
+            "schema", "relevance", "duplication", "mcq_hygiene"
         }
         for gate, record in report.items():
             assert record["not_applicable"] == 0, gate
@@ -457,9 +457,9 @@ class TestGateTwoNotApplicable:
             embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
         )
         assert [i.slot_id for i in valid] == ["A-01"]
-        assert not [i for i in issues if i.gate == "groundedness"]
+        assert not [i for i in issues if i.gate == "relevance"]
 
-        g = gates["groundedness"]
+        g = gates["relevance"]
         assert g["not_applicable"] == 1
         # Not evaluated, and above all NOT passed: nothing was checked.
         assert g["evaluated"] == 0
@@ -478,8 +478,8 @@ class TestGateTwoNotApplicable:
         )
         assert len(valid) == 1
         assert issues == []
-        assert gates["groundedness"]["failed"] == 0
-        assert gates["groundedness"]["not_applicable"] == 1
+        assert gates["relevance"]["failed"] == 0
+        assert gates["relevance"]["not_applicable"] == 1
 
     def test_a_span_item_is_still_evaluated_normally(self) -> None:
         _, issues, gates = validate_generated_items(
@@ -489,10 +489,10 @@ class TestGateTwoNotApplicable:
             groundedness_scorer=lambda answer, source: -999.0,
             embedding_fn=None,
         )
-        assert [i.gate for i in issues] == ["groundedness"]
-        assert gates["groundedness"]["evaluated"] == 1
-        assert gates["groundedness"]["failed"] == 1
-        assert gates["groundedness"]["not_applicable"] == 0
+        assert [i.gate for i in issues] == ["relevance"]
+        assert gates["relevance"]["evaluated"] == 1
+        assert gates["relevance"]["failed"] == 1
+        assert gates["relevance"]["not_applicable"] == 0
 
     def test_evaluated_plus_not_applicable_accounts_for_every_item(self) -> None:
         """The invariant the counter exists for: for a gate that ran,
@@ -510,7 +510,7 @@ class TestGateTwoNotApplicable:
             groundedness_scorer=lambda answer, source: 10.0,
             embedding_fn=None,
         )
-        g = gates["groundedness"]
+        g = gates["relevance"]
         assert gates["schema"]["evaluated"] == 4, "all four reached gate 2"
         assert g["evaluated"] == 2
         assert g["not_applicable"] == 2
@@ -527,7 +527,7 @@ class TestGateTwoNotApplicable:
             groundedness_scorer=None,
             embedding_fn=None,
         )
-        g = gates["groundedness"]
+        g = gates["relevance"]
         assert g["skipped"] is True
         assert g["not_applicable"] == 1
         assert g["evaluated"] == 0
@@ -659,7 +659,7 @@ class TestManifestReportsSynthesisCount:
         manifest = self._run(
             tmp_path, specs, groundedness_scorer=lambda answer, source: 10.0
         )
-        g = manifest["validation"]["groundedness"]
+        g = manifest["validation"]["relevance"]
         assert g["not_applicable"] == 1
         assert g["evaluated"] == 1
         assert g["passed"] == 1

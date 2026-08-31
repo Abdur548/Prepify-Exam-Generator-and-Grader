@@ -253,24 +253,24 @@ class TestGenerateExam:
             ).manifest
 
         without = run(tmp_path / "without")
-        assert without["validation"]["groundedness"]["skipped"] is True
+        assert without["validation"]["relevance"]["skipped"] is True
         assert without["validation"]["duplication"]["skipped"] is True
-        assert without["validation"]["groundedness"]["evaluated"] == 0
+        assert without["validation"]["relevance"]["evaluated"] == 0
 
         with_scorers = run(
             tmp_path / "with",
             groundedness_scorer=lambda answer, source: 10.0,
             embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
         )
-        assert with_scorers["validation"]["groundedness"]["skipped"] is False
-        assert with_scorers["validation"]["groundedness"]["evaluated"] == 1
-        assert with_scorers["validation"]["groundedness"]["passed"] == 1
-        assert with_scorers["validation"]["groundedness"]["failed"] == 0
+        assert with_scorers["validation"]["relevance"]["skipped"] is False
+        assert with_scorers["validation"]["relevance"]["evaluated"] == 1
+        assert with_scorers["validation"]["relevance"]["passed"] == 1
+        assert with_scorers["validation"]["relevance"]["failed"] == 0
 
         # The distinction the old bare-count manifest could not express.
         assert (
-            without["validation"]["groundedness"]
-            != with_scorers["validation"]["groundedness"]
+            without["validation"]["relevance"]
+            != with_scorers["validation"]["relevance"]
         )
 
     def test_regeneration_pass_capped_at_one(self, tmp_path: Path) -> None:
@@ -313,18 +313,25 @@ class TestValidateGeneratedItems:
         assert issues[0].gate == "schema"
         assert issues[0].slot_id == "A-01"
 
-    def test_groundedness_gate_flags_low_score(self) -> None:
+    def test_relevance_gate_flags_score_below_floor(self) -> None:
+        """A claim scoring below RELEVANCE_FLOOR is rejected.
+
+        The fixture must sit below the floor to exercise the gate at all: at the
+        old TAU=3.5 a -1.0 fixture was a rejection, but after the demotion to a
+        relevance floor of -2.0 it is a PASS, and the test would have gone green
+        while checking nothing.
+        """
         _, validate_generated_items = _import_validate()
         spec = _spec("A-01", "n1", "s1")
         valid, issues, _gates = validate_generated_items(
             specs=[spec],
             raw_items=[_item("A-01")],
             span_text_by_id={"s1": "Source content."},
-            groundedness_scorer=lambda answer, source: -1.0,
+            groundedness_scorer=lambda answer, source: -5.0,
             embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
         )
         assert valid == []
-        assert issues[0].gate == "groundedness"
+        assert issues[0].gate == "relevance"
 
     def test_duplication_gate_flags_similar_items(self) -> None:
         _, validate_generated_items = _import_validate()

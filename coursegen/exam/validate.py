@@ -61,7 +61,7 @@ def new_gate_report() -> dict[str, dict[str, Any]]:
             "skipped": False,
             "not_applicable": 0,
         }
-        for gate in ("schema", "groundedness", "duplication", "mcq_hygiene")
+        for gate in ("schema", "relevance", "duplication", "mcq_hygiene")
     }
 
 
@@ -85,7 +85,7 @@ def validate_generated_items(
     parsed: list[tuple[ItemSpec, GeneratedItem]] = []
 
     gates = new_gate_report()
-    gates["groundedness"]["skipped"] = groundedness_scorer is None
+    gates["relevance"]["skipped"] = groundedness_scorer is None
     gates["duplication"]["skipped"] = embedding_fn is None
 
     def record(gate: str, ok: bool) -> None:
@@ -127,7 +127,10 @@ def validate_generated_items(
     for spec, item in parsed:
         source = "\n".join(span_text_by_id[sid] for sid in spec.span_ids)
 
-        # Gate 2: groundedness.
+        # Gate 2: relevance. NOT groundedness - see the disproof above
+        # RELEVANCE_FLOOR in config. The reranker cannot separate a true claim
+        # from a false one about the same span, so this gate only rejects text
+        # that is not about the source material at all.
         #
         # A synthesis item (§6.4) is written to INVENT its artifact — a novel
         # game tree, a novel word problem — with the span as context rather than
@@ -141,18 +144,18 @@ def validate_generated_items(
         # whether or not a scorer was supplied: whether an item is groundable is
         # a property of the item, not of what the caller happened to inject.
         if spec.grounding == "synthesis":
-            record_not_applicable("groundedness")
+            record_not_applicable("relevance")
         elif groundedness_scorer is not None:
             score = groundedness_scorer(_groundedness_claim(spec, item), source)
-            if score < config.GROUNDEDNESS_TAU:
-                record("groundedness", False)
+            if score < config.RELEVANCE_FLOOR:
+                record("relevance", False)
                 issues.append(ValidationIssue(
                     slot_id=item.slot_id,
-                    gate="groundedness",
-                    message=f"score={score:.4f} < GROUNDEDNESS_TAU={config.GROUNDEDNESS_TAU}",
+                    gate="relevance",
+                    message=f"score={score:.4f} < RELEVANCE_FLOOR={config.RELEVANCE_FLOOR}",
                 ))
                 continue
-            record("groundedness", True)
+            record("relevance", True)
 
         # Gate 4: MCQ hygiene.
         if spec.item_type == "mcq":

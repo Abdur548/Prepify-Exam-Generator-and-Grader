@@ -131,9 +131,11 @@ def generate_exam(
         # WHY each slot was dropped, not just which. `flagged_slots` names the
         # casualties; without the gate and the measured score there is no way to
         # tell a correctly-rejected hallucination from a good item lost to a
-        # threshold set too high — and GROUNDEDNESS_TAU is still provisional
-        # (see config). A run that silently loses a question should say what it
-        # measured, in the same artifact that claims the paper is valid.
+        # threshold set too high. This is the field that exposed the gate-2
+        # disproof (see config): it recorded the score behind a dropped slot
+        # whose claim was verbatim in its own span. A run that silently loses a
+        # question should say what it measured, in the same artifact that
+        # claims the paper is valid.
         "validation_issues": [
             {"slot_id": i.slot_id, "gate": i.gate, "message": i.message[:config.ISSUE_MESSAGE_MAX_CHARS]}
             for i in issues
