@@ -21,3 +21,13 @@ htmlcov/
 data/qdrant/
 output/
 *.log
+
+# Uploaded course material — NEVER commit (S7).
+# `data/qdrant/` alone was not enough: a student's or professor's source decks land
+# in data/<course name>/ and were fully stageable by `git add -A`. This repository is
+# public; a professor's unpublished slides are not ours to publish. Caught 2026-08-30
+# when 14 real lecture PDFs (30 MB) showed as untracked rather than ignored.
+# If the §14.6 pre-baked demo collection is ever committed, do it deliberately with
+# `git add -f` after the S9 secret scan — never by relaxing this rule.
+data/
+!data/.gitkeep

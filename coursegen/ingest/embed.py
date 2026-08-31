@@ -50,14 +50,26 @@ def embed_chunks(chunks: list[Chunk], model: "BGEM3FlagModel") -> EmbedResult:  
         )
 
     texts = [c.text for c in chunks]
+
+    # NOTE: do not pass `show_progress_bar` here. It is a sentence-transformers
+    # parameter, not a FlagEmbedding one — BGEM3FlagModel.encode forwards unknown
+    # kwargs straight to the tokenizer, and transformers >= 4.5x rejects it with
+    # `_batch_encode_plus() got an unexpected keyword argument`. It was present
+    # from P1 and never fired, because every test mocks embed_chunks: the real
+    # embedding path first executed on 2026-08-30, against 14 real lecture decks,
+    # and failed immediately. Progress is logged below instead.
+    logger.info(
+        "Embedding %d chunks (batch size %d) …",
+        len(texts), config.EMBEDDING_BATCH_SIZE,
+    )
     output = model.encode(
         texts,
         batch_size=config.EMBEDDING_BATCH_SIZE,
         return_dense=True,
         return_sparse=True,
         return_colbert_vecs=False,
-        show_progress_bar=len(texts) > config.EMBEDDING_BATCH_SIZE,
     )
+    logger.info("Embedded %d chunks.", len(texts))
 
     dense = np.array(output["dense_vecs"], dtype=np.float32)
     sparse = [dict(w) for w in output["lexical_weights"]]

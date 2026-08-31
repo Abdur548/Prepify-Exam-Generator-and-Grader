@@ -866,3 +866,36 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 - [ ] **Calibrate `TOPIC_MATCH_RELATIVE_FLOOR` and `TOPIC_MATCH_MIN_EVIDENCE`** on that deck.
       Both ship uncalibrated and were deliberately not tuned against fixtures.
 - [ ] **Generate one exam with a real model.** No live call has ever been made.
+
+---
+
+## First real ingest — findings  [2026-08-30]
+
+14 real AI lecture decks (30 MB) → 571 nodes, 572 spans. All five blueprint topics matched
+(52 / 11 / 19 / 5 / 10 nodes, best scores 8.56–20.90 against an evidence floor of 1.5).
+`fill_ratio` 1.00, `allocation_fidelity` 0.95, Bloom realised exactly on the declared target.
+
+- [x] **`embed_chunks` passed `show_progress_bar` to `BGEM3FlagModel.encode`** — a
+      sentence-transformers parameter FlagEmbedding forwards straight to the tokenizer, which
+      `transformers` 4.57 rejects. **The real embedding path had never executed**: every P1 test
+      mocks `embed_chunks`, so P1 was gated PASS, re-verified through two corrective passes, and
+      first ran for real on 2026-08-30 — failing on its first line.
+- [x] **`data/` was not gitignored.** Only `data/qdrant/` was. `git add -A` would have committed
+      14 lecture PDFs to a public repository (S7: a professor's unpublished material). Caught
+      before staging.
+
+- [ ] **🔴 Add an opt-in test that runs the REAL embedder** on two or three chunks, marked like
+      `--live` so it stays out of the default run. "The model actually runs" is currently proven
+      nowhere, and that is how the above survived four days and 375 green tests.
+- [ ] **🟠 `coverage_ratio` answers the wrong question under an authored blueprint.** It reported
+      **0.04** — 20 nodes of 571 — because it measures against the whole corpus while the
+      blueprint asked for five specific topics. Arithmetically correct, practically meaningless,
+      and it is the metric P6 compares against `baseline_naive`. It should measure coverage
+      *within the matched topic sets*: of the ~97 nodes the five topics matched, how many did the
+      paper reach? Decide before P6.
+- [ ] **Pre-bake the demo collection (L14, now urgent).** Embedding 572 chunks took **10 minutes
+      on CPU**. A live ingest of this corpus cannot happen during a demo.
+- [ ] MDP matched only 5 nodes — thinnest of the five topics, 3 items from 5 candidates. Watch it
+      if the deck changes.
+- [ ] MuPDF logged "No common ancestor in structure tree" 5× during parse. Non-fatal, parse
+      succeeded; worth understanding before P7.
