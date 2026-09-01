@@ -16,7 +16,7 @@
 | A01 | Stage 1 fix — topic→node rule replaced with matched IDF mass | PASS | `python -m pytest` (356) + `python -m coursegen --dry-run`; 3/3 mutations caught; shipped blueprints byte-identical vs `ebc6c1b`. **Unblocks stage 4** | 2026-08-30 |
 | — | First real exam generation (live model, real corpus) | PASS | `python -m pytest` (375) + `python tests/verify_exam.py`; 20/20 items, 100/100 marks, 4 calls | 2026-09-01 |
 | — | Gate 2 disproven → demoted to relevance floor | PASS | `python -m pytest` (375); mutation-tested | 2026-09-01 |
-| P6 | Evaluation + baseline | NOT STARTED | | |
+| P6 | Evaluation + baseline | PARTIAL | `python -m coursegen.eval` + `python -m pytest` (402); allocation arms measured, solver 2.4-4.0x baseline on mass coverage. LLM-reliability and browser dimensions not yet run | 2026-09-01 |
 | P7 | Hardening + rehearsal | NOT STARTED | | |
 
 ---
@@ -2390,3 +2390,107 @@ validation gates whether the paper is correct only asks whether they agree with 
 and all four passed the paper in which every citation was fabricated, because no gate ever
 compared `source_ref` against the corpus. A gate suite reports on what it was told to look
 at, which is why the check that found this had to be built outside it.
+
+---
+
+## P6 — allocation evaluation: solver vs baseline, measured  [2026-09-01]
+
+The first evidence for the product's central claim, and the first time the claim could
+have been falsified. Zero LLM calls — allocation is where the claim lives, and it is
+measurable without spending a token.
+
+### Gate command
+
+```
+$ python -m coursegen.eval
+Course map: 571 nodes, 14 source file(s)
+
+template_ai_fundamentals_v1   (20 slots)
+  arm                     mass cov  node cov    fill  alloc fid
+  solver_mass               8.83%    0.0350    1.00       0.95
+  solver_flat               8.58%    0.0350    1.00       0.95
+  baseline_naive (mean)     3.64%    0.0350    1.00       0.00
+  solver advantage over random : 2.43x
+  beats EVERY random draw      : True
+  repetition term contributes  : 4.9% of that advantage
+
+final_default   (32 slots)
+  solver_mass              15.41%    0.0543    1.00       0.66
+  solver_flat              14.61%    0.0543    1.00       0.66
+  baseline_naive (mean)     5.88%    0.0560    1.00       0.00
+  solver advantage over random : 2.62x
+  beats EVERY random draw      : True
+  repetition term contributes  : 8.5% of that advantage
+  !! only 66% of the solver's slots were placed by mass
+
+midterm_default   (22 slots)
+  solver_mass              11.65%    0.0368    1.00       0.73
+  solver_flat              11.07%    0.0368    1.00       0.73
+  baseline_naive (mean)     3.85%    0.0385    1.00       0.00
+  solver advantage over random : 3.02x
+  beats EVERY random draw      : True
+  repetition term contributes  : 7.4% of that advantage
+
+quiz_default   (7 slots)
+  solver_mass               5.05%    0.0123    1.00       0.71
+  solver_flat               4.76%    0.0105    1.00       0.86
+  baseline_naive (mean)     1.26%    0.0123    1.00       0.00
+  solver advantage over random : 3.99x
+  beats EVERY random draw      : True
+  repetition term contributes  : 7.5% of that advantage
+```
+
+```
+$ python -m pytest
+402 passed, 1 skipped, 1 warning in 44.75s
+```
+
+### The three results
+
+**1. The central claim holds.** The solver covers 2.4x-4.0x the instructional mass of a
+random paper of identical shape, and beats **every individual draw** on every blueprint,
+not merely the mean. Baseline stdev is 0.36%-0.65%, so the margin is many standard
+deviations wide.
+
+**2. The repetition term is real but small.** `(1 + ln(1 + mean_df_other))` supplies
+**4.9%-8.5%** of the solver's advantage over random. The remaining ~92% comes from
+weighting by size at all. §16 asked whether the term changes anything measurable: it does,
+and now the answer carries a magnitude rather than a yes. Whether 5-8% justifies the
+complexity of a cross-document key-term index is a judgement call, but it is now an
+informed one.
+
+**3. `final_default` places only 66% of its slots by mass.** The `allocation_fidelity`
+guard fired exactly as designed. A third of that paper is chosen by span exhaustion, so
+its 2.62x advantage is credited partly to a mechanism that has nothing to do with the
+thesis. Reported, not buried.
+
+### What the metric change cost, and why it was necessary
+
+Had this run as originally specified — comparing arms on `coverage_ratio` — it would have
+reported the solver **losing** on two of four blueprints and tying on the other two. The
+architecture's central claim would have been recorded as unsupported. The metric counts
+distinct nodes touched, and the solver concentrates slots on dense nodes, so it scores
+lower for doing the thing it exists to do.
+
+`mass_coverage_ratio` was not invented for this: `mass_covered` was already computed in
+`build_report` and had simply never been used as the comparison.
+
+### Deliberately NOT claimed
+
+- Nothing here says the solver's papers are **better exams**. It says they are drawn from
+  denser material. `instructional_mass` is itself a heuristic, and a 2.6x mass advantage
+  is not a 2.6x pedagogical advantage.
+- Nothing here evaluates the generated questions at all — not correctness, not difficulty,
+  not pedagogy. Gate 2 was disproven the same day and no factuality instrument exists.
+- One corpus, one course, 14 decks. Whether the advantage holds on a different subject is
+  untested.
+
+### Files
+
+- `coursegen/eval/baseline.py` — the control arm.
+- `coursegen/eval/harness.py` — three arms, per-blueprint comparison, text + JSON report.
+- `coursegen/eval/__main__.py` — `python -m coursegen.eval`.
+- `tests/test_p6_baseline.py`, `tests/test_p6_harness.py` — 14 tests, including the two
+  that pin the metric finding and the one asserting `solver_flat` is never graded on the
+  objective it optimised.
+
