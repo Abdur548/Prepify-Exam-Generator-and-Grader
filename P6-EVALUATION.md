@@ -62,14 +62,16 @@ Against `PER_EXAM_CALL_CAP` this is 4 of 20 calls — a 5× headroom on the cap.
 
 **Question.** Does mass-driven allocation select better content than a naive baseline?
 
-**`baseline_naive` does not exist yet.** It must be built before this section can run.
+**`baseline_naive` is BUILT** — `coursegen/eval/baseline.py`, tested in
+`tests/test_p6_baseline.py`.
 
-### Definition to implement
-
-`baseline_naive` — same blueprint, same item count, same LLM, same prompt. The only
-difference: spans are chosen by **uniform random sampling over eligible nodes**, ignoring
-`instructional_mass`, topic matching, and Bloom targeting. Same seed discipline as the solver
-so the comparison is reproducible.
+Same blueprint, same item count, same LLM, same prompt. Spans are chosen by **uniform random
+sampling over eligible nodes**, ignoring `instructional_mass` and topic matching. It differs
+from the solver in **exactly one variable** — a control differing in several proves nothing,
+because a loss cannot be attributed. Section shape, span uniqueness, `requires_flags_any` and
+the Bloom ladder are preserved: those are blueprint requirements rather than solver
+cleverness, and beating an invalid paper would prove nothing either. Seeded from
+`(seed, blueprint_id, section_id)`, so every number below is re-derivable.
 
 ### The guard that matters most
 
@@ -138,8 +140,10 @@ be read as a 2.5× pedagogical advantage.
 token-count produce indistinguishable coverage, the repetition term does nothing measurable
 and the honest report says so plainly rather than claiming it matters.
 
-*Falsified if* `baseline_naive` matches or beats `solver_mass` on coverage at equal
-`fill_ratio`.
+*Falsified if* `baseline_naive` matches or beats `solver_mass` on **`mass_coverage_ratio`**
+at equal `fill_ratio`. Stated on mass, not on `coverage_ratio` — the measurement above is
+precisely that the coverage form of this condition fires against the solver even when the
+thesis holds.
 
 ---
 
