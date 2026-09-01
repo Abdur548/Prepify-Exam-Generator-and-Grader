@@ -420,6 +420,26 @@ ERROR_BODY_MAX_CHARS: int = 500
 # errors from pydantic can run to thousands of characters; the manifest is a
 # diagnostic record, not a log sink.
 ISSUE_MESSAGE_MAX_CHARS: int = 300
+
+# Virtual memory BGE-M3 needs to load and run a forward pass, in GB.
+#
+# Measured 2026-09-01 the hard way. On a machine with 15.88 GB RAM but a MANUALLY
+# CAPPED page file (initial 2048 MB, max 4096 MB, automatic management off), total
+# virtual memory was 19.88 GB with 3.83 GB free -- and BGE-M3 died with
+# `OSError 1455: The paging file is too small for this operation`.
+#
+# The failure mode is what makes this worth a preflight check rather than a note.
+# The weights are memory-mapped, so loading SUCCEEDS and the process only dies when
+# the forward pass touches a page that cannot be backed. That surfaces as a Windows
+# access violation (exit -1073741819 / 0xC0000005), which is a hard process kill:
+# no Python exception, no traceback, no degraded-mode JSON. Under uvicorn it takes
+# the worker down mid-request. Nothing downstream can catch it, which is precisely
+# why it has to be caught BEFORE the model is asked to run.
+#
+# 4.0 GB is the working figure: ~2.2 GB of fp32 weights plus load-time transients.
+# It is a floor derived from one failing observation, not a calibrated minimum --
+# the true requirement has never been measured from below (P6-EVALUATION.md E5.2).
+MIN_FREE_VIRTUAL_MEMORY_GB: float = 4.0
 LLM_TIMEOUT_SECONDS: int = 120       # L7: generous but bounded
 MAX_RETRIES: int = 2                 # L1, R5: 1 original + 2 retries = 3 attempts
 RETRY_BASE_DELAY_SECONDS: float = 1.0

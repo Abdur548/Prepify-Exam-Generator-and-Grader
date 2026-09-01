@@ -161,10 +161,19 @@ These are the cheap endpoints and they are not the interesting ones.
 
 ### SPECIFIED
 
-- **E3.1 First-call model load.** BGE-M3 and the cross-encoder load lazily on first
-  generate/chat. That first request pays the whole load. Measure cold vs warm. *Gate:* the UI
-  must not appear hung — if cold latency exceeds ~10 s, a progress affordance is required,
-  not a spinner that lies.
+- **E3.1 MEASURED 2026-09-01 — the first request costs ~51 s before any work begins.**
+
+  | stage | cold |
+  |---|---|
+  | cross-encoder (reranker) load | **41.06 s** |
+  | reranker first predict (warm) | 0.24 s |
+  | BGE-M3 load | **10.29 s** |
+  | **total before generation starts** | **~51.4 s** |
+
+  Far past the ~10 s threshold this gate named, so a progress affordance is **required**,
+  not optional. A bare spinner will read as a hang, users will click Generate again, and
+  `_PIPELINE_LOCK` turns the second click into a longer silent wait.
+  BGE-M3's first *encode* could not be timed — the process died (see E5.2).
 - **E3.2 Generation latency at p50/p95** across ≥5 runs. One 21.4 s sample is not a
   distribution.
 - **E3.3 Lock wait time.** `_PIPELINE_LOCK` serialises generation. Measure the second
@@ -226,8 +235,37 @@ Index is ~0.22× the source size, which is cheap. Embedding time is the binding 
 
 - **E5.1 Ingest scaling curve** at 1 / 5 / 14 / 30 decks — is it linear, and where does the
   10-minute figure go at 3× the corpus?
-- **E5.2 Memory ceiling.** BGE-M3 plus a cross-encoder resident simultaneously. *Gate:* peak
-  RSS on the demo machine's actual RAM.
+- **E5.2 MEASURED 2026-09-01 — BGE-M3 CANNOT RUN on this machine as configured. 🔴**
+
+  `OSError 1455: The paging file is too small for this operation`, and before that a
+  bare Windows access violation (exit `-1073741819` / `0xC0000005`).
+
+  | quantity | value |
+  |---|---|
+  | RAM free / total | 5.57 GB / 15.88 GB |
+  | **virtual free / total** | **3.83 GB / 19.88 GB** |
+  | page file | **manually capped: initial 2048 MB, max 4096 MB, automatic management OFF** |
+
+  **The failure mode is what makes this severe.** Weights are memory-mapped, so loading
+  SUCCEEDS and the process dies later, when the forward pass touches a page that cannot be
+  backed. That is a hard process kill: no Python exception, no traceback, no degraded-mode
+  JSON. Under uvicorn it takes the worker down mid-request, and **no amount of error
+  handling in the application can catch it.**
+
+  Blast radius: `/api/ingest` (cannot onboard new material) and `/api/chat` (embeds the
+  query). Generation from the already-ingested corpus still works, but only because
+  `embedding_fn=None` leaves the dedup gate unwired — wiring it would crash the server too.
+
+  Five hypotheses were tested and refuted before this one held: FlagEmbedding
+  incompatibility, the `return_sparse` flag, a corrupted model cache (`.no_exist/` is
+  HuggingFace's normal negative-cache marker, not damage), a tokenizer/model vocab mismatch
+  (250002 both sides, max id 87506, in range), and a bad model revision.
+
+  **Fix (user action):** set the page file to system-managed, or raise the maximum to
+  16–24 GB. Then re-run `python -m coursegen.eval` and the E3.1 timings.
+
+  `preflight` now reports this as its own `memory` check rather than letting `models: ok`
+  imply the models can run.
 - **E5.3 The single-worker ceiling is architectural, not incidental.** Qdrant's exclusive file
   lock (S8) plus `_PIPELINE_LOCK` means throughput is exactly one exam at a time. State the
   concurrent-user ceiling as a number rather than leaving it implied.

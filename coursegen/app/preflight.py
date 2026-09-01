@@ -37,6 +37,10 @@ def preflight_status(output_dir: Optional[Path] = None) -> dict[str, str]:
         "api_key": ("API key (GEMINI_API_KEY)", _check_api_key),
         "output_dir": ("output directory writable", lambda: _check_output_dir(output_dir)),
         "models": ("embedding + reranker models on disk", _check_models_present),
+        # Ordered after `models` deliberately: "the files are here" and "this
+        # machine can actually run them" are different questions, and only the
+        # first was ever asked.
+        "memory": ("memory headroom for BGE-M3", _check_memory_headroom),
         "weasyprint": ("WeasyPrint / GTK runtime", check_weasyprint_available),
         "qdrant": ("Qdrant openable", _check_qdrant_openable),
     }
@@ -68,6 +72,70 @@ def _check_output_dir(output_dir: Path) -> None:
         raise RuntimeError(
             f"Output directory {output_dir} is not writable: {exc}"
         ) from exc
+
+
+def _free_virtual_memory_gb() -> Optional[float]:
+    """Free virtual memory in GB, or None where it cannot be determined.
+
+    None is not a failure. A machine whose memory cannot be read is not a machine
+    that is out of memory, and a preflight that fails closed on an unknown would
+    block startup on every platform this helper does not cover.
+    """
+    if os.name == "nt":
+        import ctypes
+
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = _MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        # AvailPageFile is committable memory: RAM plus room in the page file.
+        # That is the quantity OSError 1455 is complaining about, not free RAM.
+        return status.ullAvailPageFile / (1024 ** 3)
+
+    try:
+        pages = os.sysconf("SC_AVPHYS_PAGES")
+        size = os.sysconf("SC_PAGE_SIZE")
+        return (pages * size) / (1024 ** 3)
+    except (ValueError, AttributeError, OSError):
+        return None
+
+
+def _check_memory_headroom() -> None:
+    """Refuse to promise the models will run when they provably will not.
+
+    Preflight already reports whether the model FILES are on disk. That check
+    passed on 2026-09-01 on a machine where BGE-M3 could not complete a forward
+    pass -- so preflight said "ok" about a model that would kill the process. A
+    check that reports a system as ready when it is not is worse than no check,
+    because it is believed.
+
+    This does not guarantee the models will run. It catches the one condition
+    already observed to kill them.
+    """
+    free = _free_virtual_memory_gb()
+    if free is None:
+        return
+    if free < config.MIN_FREE_VIRTUAL_MEMORY_GB:
+        raise RuntimeError(
+            f"only {free:.2f} GB of committable memory free; BGE-M3 needs about "
+            f"{config.MIN_FREE_VIRTUAL_MEMORY_GB:.1f} GB. Ingest and chat will kill "
+            f"the process (Windows access violation, not a catchable error). "
+            f"Free memory, or raise the page file -- a manually capped page file is "
+            f"the usual cause."
+        )
 
 
 def _check_models_present() -> None:
