@@ -1,5 +1,8 @@
 # Prepify
 
+**Start here: [STATE.md](STATE.md)** — where the project stands, what is broken,
+what the evaluation found, and what is left.
+
 Prepify generates university exam papers from a student's own course material. You upload
 your lecture slides and notes; Prepify builds a course map of the syllabus, and a
 deterministic **solver** allocates every question slot across that map before any language
