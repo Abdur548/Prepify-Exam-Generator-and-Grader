@@ -79,25 +79,52 @@ rather than from mass. Reporting coverage alone credits the mass-allocation thes
 that exhaustion is doing. A solver that wins on coverage while placing 38% of its paper by
 exhaustion has not demonstrated the claim.
 
-### The metric problem, unresolved — decide before publishing any number
+### MEASURED 2026-09-01 — the metric was wrong, and it was wrong in the worst direction
 
-`coverage_ratio` counts matched nodes against the **whole corpus**. It was disconnected from
-the API and UI on 2026-09-01 because it read **0.04** on a paper that was 20/20 items and
-100/100 marks.
+`baseline_naive` is built (`coursegen/eval/baseline.py`). Running both arms over the real
+571-node corpus produced the finding that reshapes this phase.
 
-For E2 it is *sound as a comparative metric* — both arms share a denominator, so the
-difference is real even when the absolute is small. The trap is different: if both arms run
-against an **authored** blueprint, both are confined to five topics, both score ~0.04, and the
-real difference compresses toward measurement noise.
+**`coverage_ratio` never favours the solver. On two of four blueprints it favours the
+baseline.**
 
-Two acceptable resolutions, one required:
+| blueprint | solver | baseline | verdict |
+|---|---|---|---|
+| `quiz_default` | 0.0123 | 0.0123 | equal |
+| `midterm_default` | 0.0368 | 0.0385 | **solver worse** |
+| `final_default` | 0.0543 | 0.0560 | **solver worse** |
+| `ai_fundamentals_v1` | 0.0350 | 0.0350 | equal |
 
-1. Run E2 against a **derived** blueprint (whole-corpus), which is the regime the metric was
-   designed for; or
-2. Measure **within the matched topic sets** and name it `topic_coverage_ratio`, leaving
-   `coverage_ratio`'s definition untouched.
+The mechanism: `coverage_ratio` counts **distinct nodes touched**. The solver deliberately
+concentrates several slots on the highest-mass nodes; the naive sampler spreads across nodes
+for free. **The solver scores lower precisely by doing the thing it claims to do.**
 
-Changing the definition after publishing invalidates the comparison. Pick first.
+Had P6 been run as originally specified — "solver vs `baseline_naive`, compared on coverage" —
+it would have reported that the architecture's central claim is unsupported. A false
+negative produced entirely by the choice of metric.
+
+**`mass_covered` discriminates correctly, on every blueprint.** It was already being computed
+in `build_report` and had never been used this way.
+
+| blueprint | solver | baseline | ratio |
+|---|---|---|---|
+| `quiz_default` | **5.05%** | 0.79% | 6.4× |
+| `midterm_default` | **12.52%** | 4.94% | 2.5× |
+| `final_default` | **16.28%** | 6.43% | 2.5× |
+| `ai_fundamentals_v1` | **8.83%** | 3.11% | 2.8× |
+
+Over ten seeds on the authored blueprint the solver beat **every individual draw**, not just
+the mean (baseline mean 3.64%, stdev ≈ 0).
+
+**E2's headline metric is therefore `mass_coverage_ratio` — mass of covered nodes over total
+corpus mass — with `coverage_ratio` reported alongside as a dispersion figure, never as the
+verdict.** Pinned by `tests/test_p6_baseline.py::TestTheMetricFinding`.
+
+### What this result does NOT show
+
+It shows the solver selects **denser** content by `instructional_mass`. Whether a paper built
+from denser content is a **better exam** is a different question, and nothing measured here
+answers it — `instructional_mass` is itself a heuristic. P6 must not let a 2.5× mass advantage
+be read as a 2.5× pedagogical advantage.
 
 ### Arms to run
 
