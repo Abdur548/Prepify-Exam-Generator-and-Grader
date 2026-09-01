@@ -635,7 +635,8 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
   </details>
 
-- [ ] **🔴 The editable install points at a DEAD tree — fix before any demo rehearsal.**
+- [x] **CLOSED 2026-09-01 — verified.** `import coursegen` resolves to
+      `E:\Qoder\prepify\coursegen`. Was: the editable install pointed at a DEAD tree.
       `pip install -e .` was originally run from Qoder's day-one shadow workspace, and the
       `.pth`/finder still resolves there:
       ```
@@ -842,14 +843,15 @@ drifts into evaluating whatever happens to be easy to measure.
 
 Build order (from the spec):
 
-- [ ] **🔴 `baseline_naive`** — uniform random span selection, same blueprint/prompt/model.
-      Does not exist anywhere in the tree. E2 is the phase's reason to exist and nothing
-      else unblocks it.
-- [ ] **🔴 Resolve the coverage metric before publishing any E2 number.** Corpus-wide
-      `coverage_ratio` is sound as a COMPARATIVE metric but compresses to noise if both arms
-      run an authored blueprint. Either run E2 on a derived blueprint, or introduce
-      `topic_coverage_ratio` and leave the old definition alone. Redefining after publishing
-      invalidates the baseline.
+- [x] **DONE 2026-09-01** — `coursegen/eval/baseline.py`, tested in `tests/test_p6_baseline.py`.
+      Differs from the solver in exactly one variable; preserves span uniqueness, section
+      shape and flag constraints; seeded and reproducible; `allocation_fidelity` 0.0 by
+      construction.
+- [x] **RESOLVED 2026-09-01, and the concern was understated.** `coverage_ratio` does not
+      merely compress to noise — it is INVERTED: it favours the baseline on 2 of 4
+      blueprints, because it counts distinct nodes and the solver concentrates on dense
+      ones. E2's headline is now `mass_coverage_ratio`. Pinned by
+      `tests/test_p6_baseline.py::TestTheMetricFinding`.
 - [ ] **🔴 N-run variance harness (E8.1).** Reusable by E1, E3 and E8. One clean run is a
       data point, not a reliability figure.
 - [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
@@ -942,7 +944,9 @@ recorded, so that "we know about it" does not decay into "we forgot about it".
 
 ### Blocking P5 — found during the first real run, 2026-09-01
 
-- [ ] **🔴 `output/` has no write lock, and P5 makes concurrent runs normal.** A manifest was
+- [x] **DONE 2026-09-01** — `_PIPELINE_LOCK` in `coursegen/app/main.py` serialises
+      generation. Per-run output directories remain the right long-term fix and are queued
+      under Finishing touches. Original finding: `output/` had no write lock. A manifest was
       observed describing a different paper than the artifacts beside it (claiming
       `mcq_hygiene: 8` and flagging A-05, while the PDFs contained 9 MCQs including A-05)
       because a second process wrote into `output/` mid-run. A clean re-run showed console
