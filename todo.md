@@ -829,6 +829,32 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
+## Finishing touches — deferred polish  [OPEN — do not block P6]
+
+Things that are wrong but not load-bearing. Deferred deliberately, with the reason
+recorded, so that "we know about it" does not decay into "we forgot about it".
+
+- [ ] **🟠 Redefine `coverage_ratio`, or retire the name.** Disconnected from the API and UI on
+      2026-09-01. It measures matched nodes against the WHOLE corpus, which was the right
+      question when every blueprint was derived from the whole corpus. Under an authored
+      blueprint asking for five named topics it answers a question nobody asked: 0.04 on a
+      complete paper, because the paper legitimately covered 20 of 571 nodes.
+      The intended redefinition: coverage **within the matched topic sets** — of the ~97 nodes
+      the five topics matched, how many did the paper reach? That number is meaningful and
+      would have read ~0.21 rather than 0.04.
+      **Constraint:** P6 compares against `baseline_naive`. If the definition changes after P6
+      runs, the baseline comparison is invalidated and must be re-run. Either redefine BEFORE
+      P6 publishes numbers, or pin the old definition for the baseline and introduce the new one
+      under a different name (`topic_coverage_ratio`).
+- [ ] **🟠 Render DOCX locators as `¶12`, not `p.12`.** Carried from P4. A paragraph index shown
+      as a page number sends a student to the wrong place in their own file.
+- [ ] **🟠 Mark synthesis items visibly for the student.** 8 of 20 items on the real paper are
+      not answerable from the uploaded material. The manifest says so; the exam does not.
+- [ ] **🟢 `@app.on_event` → `lifespan`.** Done during P5; verify no deprecation warning remains
+      in the suite output.
+
+---
+
 ## P5 — UI + resilience  [PARTIAL — wiring COMPLETE 2026-09-01, 385 tests pass; the two declared gates are still not implemented]
 
 - [x] `app/preflight.py` — R8 pre-flight check for API key, output dir, WeasyPrint, Qdrant.
@@ -965,12 +991,12 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
       sits near a constant has the same failure mode — it goes green while checking nothing.
       Sweep for fixtures chosen relative to `DEDUP_TAU`, `RERANKER_THRESHOLD`,
       `OPTION_LENGTH_BAND`, `TOPIC_MATCH_*`, and mutation-test each one.
-- [ ] **🟠 `coverage_ratio` answers the wrong question under an authored blueprint.** It reported
-      **0.04** — 20 nodes of 571 — because it measures against the whole corpus while the
-      blueprint asked for five specific topics. Arithmetically correct, practically meaningless,
-      and it is the metric P6 compares against `baseline_naive`. It should measure coverage
-      *within the matched topic sets*: of the ~97 nodes the five topics matched, how many did the
-      paper reach? Decide before P6.
+- [x] **DISCONNECTED 2026-09-01 — deferred to Finishing touches, not fixed.** `coverage_ratio`
+      is no longer returned by `/api/exam` and no longer shown in the UI, because it reported
+      **0.04** on a paper that was 20/20 items and 100/100 marks. It remains on `CoverageReport`
+      and in the `coverage.html` audit view, where the denominator is visible. Redefinition is
+      queued under **Finishing touches** below. P6 proceeds using `fill_ratio` and
+      `allocation_fidelity` as the headline metrics.
 - [ ] **Pre-bake the demo collection (L14, now urgent).** Embedding 572 chunks took **10 minutes
       on CPU**. A live ingest of this corpus cannot happen during a demo.
 - [ ] MDP matched only 5 nodes — thinnest of the five topics, 3 items from 5 candidates. Watch it

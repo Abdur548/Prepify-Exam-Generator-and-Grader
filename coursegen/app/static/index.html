@@ -236,8 +236,7 @@ document.getElementById('btn-generate').onclick = async () => {
     if (body.status === 'ok') {
       const dl = body.downloads || {};
       setStatus('generate-status',
-        `Done — ${body.items_count} item(s), fill ${(body.fill_ratio*100).toFixed(0)}%, ` +
-        `coverage ${(body.coverage_ratio*100).toFixed(0)}%`, 'ok');
+        `Done — ${body.items_count} item(s), fill ${(body.fill_ratio*100).toFixed(0)}%`, 'ok');
       const dls = document.getElementById('downloads');
       dls.style.display = 'block';
       document.getElementById('dl-exam-html').href = dl.exam_html || '#';
@@ -251,7 +250,6 @@ document.getElementById('btn-generate').onclick = async () => {
       cs.innerHTML = `
         <table>
           <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Coverage ratio</td><td>${(body.coverage_ratio*100).toFixed(1)}%</td></tr>
           <tr><td>Fill ratio</td><td>${(body.fill_ratio*100).toFixed(1)}%</td></tr>
           <tr><td>Allocation fidelity</td><td>${(body.allocation_fidelity*100).toFixed(1)}%</td></tr>
           <tr><td>Items</td><td>${body.items_count}</td></tr>

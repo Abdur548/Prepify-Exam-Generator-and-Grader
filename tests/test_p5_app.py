@@ -406,7 +406,11 @@ class TestExamPipelineWiring:
 
         assert result["status"] == "empty"
         assert result["items_count"] == 0
-        assert "coverage_ratio" in result
+        # coverage_ratio is deliberately absent from the API payload: it measures
+        # against the whole corpus and reads ~0.04 on a complete authored-blueprint
+        # paper. See the note in _run_exam_pipeline. fill_ratio is the honest
+        # headline and is asserted above.
+        assert "coverage_ratio" not in result
         assert "fill_ratio" in result
         assert "allocation_fidelity" in result
         assert "downloads" in result

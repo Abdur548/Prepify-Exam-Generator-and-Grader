@@ -246,7 +246,6 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
         return {
             "status": "degraded",
             "fill_ratio": 0.0,
-            "coverage_ratio": 0.0,
             "allocation_fidelity": 0.0,
             "unfilled_slots": [],
             "items": [],
@@ -257,7 +256,6 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
         return {
             "status": "degraded",
             "fill_ratio": 0.0,
-            "coverage_ratio": 0.0,
             "allocation_fidelity": 0.0,
             "unfilled_slots": [],
             "items": [],
@@ -341,9 +339,27 @@ def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
     # with no questions in it, and calling that "ok" makes the field decorative.
     status = "ok" if result.items else "empty"
 
+    # `coverage_ratio` is deliberately NOT returned (disconnected 2026-09-01).
+    #
+    # It measures matched nodes against the WHOLE corpus, which was the right
+    # question when every blueprint was derived from the whole corpus. Under an
+    # authored blueprint that asks for five named topics it answers a question
+    # nobody asked: on the first real paper - 20/20 items, 100/100 marks, every
+    # section filled - it read 0.04, because the paper legitimately covered 20 of
+    # 571 nodes. Arithmetically correct, and ruinous as a headline: a student
+    # would read "4% coverage" on a complete exam and distrust the tool.
+    #
+    # `fill_ratio` (slots filled / slots asked for) and `allocation_fidelity` are
+    # the honest headline numbers under an authored blueprint, and both are
+    # returned below.
+    #
+    # The field is NOT deleted from CoverageReport: P6 compares it against
+    # baseline_naive, and coverage.html still shows it in the audit view where the
+    # denominator is visible. Redefining it - coverage WITHIN the matched topic
+    # sets - is queued under "Finishing touches" in todo.md.
+
     return {
         "status": status,
-        "coverage_ratio": coverage.coverage_ratio,
         "fill_ratio": coverage.fill_ratio,
         "allocation_fidelity": coverage.allocation_fidelity,
         "unfilled_slots": coverage.unfilled_slots,
