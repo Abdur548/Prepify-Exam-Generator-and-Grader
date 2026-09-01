@@ -829,6 +829,41 @@ Four defects found reviewing P3 before it was committed. Full write-up in `progr
 
 ---
 
+## P6 — Evaluation + baseline  [SPEC DRAFTED 2026-09-01 — see P6-EVALUATION.md]
+
+Full specification in **`P6-EVALUATION.md`**: eight dimensions (generator efficiency,
+baseline, responsiveness, security, scalability, maintainability, usability, LLM
+reliability), each with a metric, a gate, and a falsification condition. Measured values
+taken 2026-09-01 are recorded there and marked apart from what is only specified.
+
+Before this phase had a spec, it had one row reading NOT STARTED and three scattered
+fragments. That is recorded here because a phase with no written scope is how a project
+drifts into evaluating whatever happens to be easy to measure.
+
+Build order (from the spec):
+
+- [ ] **🔴 `baseline_naive`** — uniform random span selection, same blueprint/prompt/model.
+      Does not exist anywhere in the tree. E2 is the phase's reason to exist and nothing
+      else unblocks it.
+- [ ] **🔴 Resolve the coverage metric before publishing any E2 number.** Corpus-wide
+      `coverage_ratio` is sound as a COMPARATIVE metric but compresses to noise if both arms
+      run an authored blueprint. Either run E2 on a derived blueprint, or introduce
+      `topic_coverage_ratio` and leave the old definition alone. Redefining after publishing
+      invalidates the baseline.
+- [ ] **🔴 N-run variance harness (E8.1).** Reusable by E1, E3 and E8. One clean run is a
+      data point, not a reliability figure.
+- [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
+- [ ] **🟠 Prompt-injection test (E4.2)** — a lecture slide reading "ignore previous
+      instructions" becomes span text and enters the prompt. Untested. Build before any demo
+      on third-party material.
+- [ ] **🟠 `allocation_fidelity` reported for the solver arm** alongside coverage. 29/32/38%
+      of placements come from span exhaustion; coverage alone credits the mass thesis for
+      exhaustion's work.
+- [ ] **🟠 `solver_flat` arm** — flat `token_count` vs `instructional_mass`, to test §16's
+      falsification condition rather than assume it.
+
+---
+
 ## Finishing touches — deferred polish  [OPEN — do not block P6]
 
 Things that are wrong but not load-bearing. Deferred deliberately, with the reason
