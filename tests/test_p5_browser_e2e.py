@@ -80,6 +80,41 @@ def live_server_url():
     return url
 
 
+
+@pytest.fixture(autouse=True)
+def _isolate_real_course_data(tmp_path, monkeypatch):
+    """Point ingest at a throwaway data dir. THE SUITE MUST NOT TOUCH REAL DATA.
+
+    This test drives a REAL `/api/ingest`, and `ingest()` writes
+    `course_map.json` and upserts into the Qdrant collection under
+    `config.DATA_DIR`. With the default path that is the user's actual corpus.
+
+    On 2026-09-01 it silently replaced 571 nodes from 14 real lecture decks with
+    2 nodes from this test's 2-page synthetic PDF. Nothing failed: the suite went
+    green, and the damage only surfaced later when an unrelated probe found the
+    course map had two nodes in it. Rebuilding costs ~10 minutes of CPU.
+
+    `ingest()` reads `config.DATA_DIR` at call time and the uvicorn server shares
+    this process, so patching the module attribute redirects the server's writes
+    too. Autouse, because remembering to opt in is exactly what failed here.
+    """
+    from coursegen import config as _config
+    sandbox = tmp_path / "data"
+    sandbox.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(_config, "DATA_DIR", sandbox)
+    monkeypatch.setattr(_config, "COURSE_MAP_PATH", sandbox / "course_map.json")
+    yield
+
+
+def test_the_e2e_fixture_isolates_real_data() -> None:
+    """Guard on the guard: prove the redirect is in force, not merely declared."""
+    from coursegen import config as _config
+    assert "course_map.json" in str(_config.COURSE_MAP_PATH)
+    assert _config.COURSE_MAP_PATH.parent != Path("data").resolve(), (
+        "ingest would write to the real corpus"
+    )
+
+
 def test_browser_end_to_end_flow(page: Page, live_server_url: str, native_pdf: Path) -> None:
     """
     Browser E2E gate (E7.1): upload -> ingest -> generate -> download -> chat.
