@@ -251,15 +251,15 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
             "items": [],
             "warnings": ["Generation stopped early: quota limit reached. The exam may be incomplete."],
         }
-    except httpx.TimeoutException:
-        logger.warning("Generation degraded: request timed out")
+    except httpx.RequestError as exc:
+        logger.warning(f"Generation degraded: network error ({type(exc).__name__})")
         return {
             "status": "degraded",
             "fill_ratio": 0.0,
             "allocation_fidelity": 0.0,
             "unfilled_slots": [],
             "items": [],
-            "warnings": ["Generation timed out. The exam may be incomplete."],
+            "warnings": ["Generation degraded by a network error. The exam may be incomplete."],
         }
     except Exception:
         # An unexpected exception is a FAILURE, not a degraded result.

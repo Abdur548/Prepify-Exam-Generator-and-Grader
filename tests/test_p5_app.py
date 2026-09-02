@@ -276,15 +276,37 @@ class TestDegradedMode:
         assert "Traceback" not in json.dumps(body)
         assert "BudgetExceeded" not in json.dumps(body)
 
-    def test_network_error_during_generation_returns_degraded_not_500(self, client) -> None:
+    def test_network_error_during_generation_returns_degraded_not_500(self, client, monkeypatch) -> None:
         import httpx
-        with patch("coursegen.app.main._run_exam_pipeline",
-                   side_effect=httpx.TimeoutException("timed out")):
-            resp = client.post("/api/exam", json={"blueprint_id": "quiz_default", "title": "Test"})
+        from coursegen.contracts.item import GeneratedItem, SourceRef, ItemSpec
+        
+        # We want to patch the actual LLMClient so generation starts and then dies.
+        # But we must also stub the models and Qdrant so it doesn't do real I/O.
+        spec1 = ItemSpec(slot_id="1", item_type="mcq", marks=5, bloom="remember", node_id="n1", span_ids=[], eligibility=[], spec_hash="h1")
+        spec2 = ItemSpec(slot_id="2", item_type="mcq", marks=5, bloom="remember", node_id="n1", span_ids=[], eligibility=[], spec_hash="h2")
+        
+        with patch("coursegen.app.main._get_reranker"), \
+             patch("coursegen.app.main._get_embed_model"), \
+             patch("coursegen.app.main._fetch_spans", return_value=({}, {})), \
+             patch("coursegen.ingest.coursemap.load_course_map", return_value=[]), \
+             patch("coursegen.exam.allocate.solve", return_value=([spec1, spec2], MagicMock())):
+            
+            call_count = [0]
+            def fake_call(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 2:
+                    raise httpx.ConnectError("network killed")
+                return {"items": [{"slot_id": "1", "stem": "Q", "model_answer": "A", "explanation": "E", "source_ref": {"file": "f", "pages": []}}]}
+                
+            with patch("coursegen.llm.client.LLMClient.call", side_effect=fake_call):
+                with patch("coursegen.app.main.config.BATCH_SIZE", 1):  # Force 1 item per batch
+                    resp = client.post("/api/exam", json={"blueprint_id": "quiz_default", "title": "Test"})
+        
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "degraded"
         assert "Traceback" not in json.dumps(body)
+        assert call_count[0] == 2
 
 
 # ---------------------------------------------------------------------------
