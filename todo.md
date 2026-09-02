@@ -864,9 +864,20 @@ Build order (from the spec):
       is ±40% RELATIVE, so it is ±3 characters on one-word options and ±15 on sentences:
       `Arrays / Linked lists / Trees / Indices` fails, four verbose sentences pass. It
       penalises the better MCQ design.
-      Fix by applying the band only above an absolute length, or by scoring the outlier
-      against the median instead of the range. **Do not just widen it** — that re-admits
-      the conspicuously-longer-correct-answer giveaway the guard exists to catch.
+      **MEASURED 2026-09-01 — use max/median, not the range.** Per R9, the signal was
+      checked for separation before any threshold was proposed. Against three synthetic
+      giveaways (the case the guard exists for) and four legitimate option sets:
+
+      | rule | giveaway | legitimate | separates? |
+      |---|---|---|---|
+      | current ±40% range | fails all 3 | **fails 1 of 4** (one-word sets) | NO |
+      | longest / median of the rest | 3.81–5.67 | 1.11–2.00 | **YES**, gap 1.81 |
+
+      `max/median` measures what the guard is actually about — ONE option standing out —
+      and is scale-free, so it behaves the same on `Trees / Arrays / Indices` as on four
+      full sentences. Midpoint of the observed gap is 2.90; a threshold near 2.5–3.0 is
+      indicated, but calibrate on more than 7 cases before shipping a number.
+      Real items measured: 2 of 4 rejected by the current rule, both short-option sets.
       This was invisible until now because the only real run used `TRUE_FALSE_SERIES`
       (2 options, "True"/"False"), which cannot trigger the guard.
 - [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
