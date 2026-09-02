@@ -20,10 +20,33 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Redact API key patterns before any log line or exception message is written (S1).
-_KEY_RE = re.compile(r"(AIza[A-Za-z0-9_\-]{35,}|sk-[A-Za-z0-9]{32,})")
+#
+# `AQ\.[\w.-]{20,}` was added 2026-09-01 because the key actually in use starts
+# `AQ.A` and is 53 characters — it matched NEITHER existing alternative, so the
+# live key passed through _redact() untouched. A redaction rule that does not
+# cover the credential you are holding is decoration.
+_KEY_RE = re.compile(
+    r"(AIza[A-Za-z0-9_\-]{35,}|sk-[A-Za-z0-9]{32,}|AQ\.[A-Za-z0-9_.\-]{20,})"
+)
 
 
 def _redact(text: str) -> str:
+    """Strip the API key from anything about to be logged or raised.
+
+    Two layers, deliberately. The literal-value pass is the one that actually
+    guarantees the property: whatever format a provider invents next, the process
+    knows its own key and can remove exactly that string. The pattern pass is the
+    fallback, covering keys that are not this process's own — a key pasted into
+    course material, or echoed back inside a provider's error body.
+
+    Relying on the pattern alone is what failed here: it was written against
+    `AIza…` when the credential in use was `AQ.A…`.
+    """
+    key = os.getenv("GEMINI_API_KEY", "")
+    # The length floor stops an empty or absurdly short value turning every
+    # character of the message into [REDACTED].
+    if len(key) >= 12:
+        text = text.replace(key, "[REDACTED]")
     return _KEY_RE.sub("[REDACTED]", text)
 
 

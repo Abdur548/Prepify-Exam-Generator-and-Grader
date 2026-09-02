@@ -1020,9 +1020,21 @@ recorded, so that "we know about it" does not decay into "we forgot about it".
       14 lecture PDFs to a public repository (S7: a professor's unpublished material). Caught
       before staging.
 
-- [ ] **🔴 Add an opt-in test that runs the REAL embedder** on two or three chunks, marked like
-      `--live` so it stays out of the default run. "The model actually runs" is currently proven
-      nowhere, and that is how the above survived four days and 375 green tests.
+- [x] **DONE 2026-09-01 — `tests/test_live_smoke.py`, 6 tests, `pytest --live -m live`.**
+      Real BGE-M3 embedding (shape, finiteness, determinism, distinct texts not collapsing),
+      real cross-encoder relevance, 2 real Gemini calls (plain + response-schema), and
+      redaction checked against the live credential. All 6 pass in 52 s.
+
+      **The `--live` mechanism already existed** in `conftest.py` from P0 (L3) and had never
+      been used — zero tests carried the marker for five days. I briefly added a second,
+      different mechanism (`addopts = -m 'not live'`) before finding it; reverted. One
+      mechanism, the one that was already tested.
+
+      Found while doing it: **the live API key leaked through `_redact()`.** The pattern
+      covered `AIza…` and `sk-…`; the key in use starts `AQ.A` and matched neither, so S1's
+      redaction did not cover the credential actually being held. Fixed with a literal-value
+      pass (the process knows its own key) plus the extended pattern, and pinned by a live
+      test that a fixture could not have caught.
 - [x] **DONE 2026-09-01 — and the premise was half wrong.** Audited by mutation: every
       guard comparing against a config threshold was disabled in turn and the suite re-run.
       A guard whose removal breaks nothing is a guard no test exercises.
