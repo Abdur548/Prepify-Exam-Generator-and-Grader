@@ -300,7 +300,7 @@ Longest functions — the maintainability hotspots:
 
 What works: the three living documents (`pipeline.md` / `progress.md` / `todo.md`) with an
 explicit precedence order; rationale recorded *in the code* at the decision site rather than
-in a wiki that drifts; `HANDOFF-ANTIGRAVITY.md` as a cold-start brief.
+in a wiki that drifts; `STATE.md` as a cold-start brief and the working rules as the rules.
 
 What does not, and should be in the report honestly:
 
@@ -316,7 +316,7 @@ What does not, and should be in the report honestly:
   breakage (`show_progress_bar`; the static-UI `SyntaxError`). Opt-in `--live` tests are
   queued and still not written.
 
-*Falsification for the handoff claim:* hand `HANDOFF-ANTIGRAVITY.md` to a fresh agent, ask
+*Falsification for the handoff claim:* hand `STATE.md` + the working rules to a fresh agent, ask
 for one scoped change, and count the questions it must ask before it can act. That number is
 the real maintainability metric, and it can be run this week.
 
