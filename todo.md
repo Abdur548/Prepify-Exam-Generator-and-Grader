@@ -870,9 +870,15 @@ Build order (from the spec):
       This was invisible until now because the only real run used `TRUE_FALSE_SERIES`
       (2 options, "True"/"False"), which cannot trigger the guard.
 - [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
-- [ ] **🟠 Prompt-injection test (E4.2)** — a lecture slide reading "ignore previous
-      instructions" becomes span text and enters the prompt. Untested. Build before any demo
-      on third-party material.
+- [x] **DONE 2026-09-01 — and it found a real hole, not just a missing test.**
+      Span text was interpolated raw between `<source_span>` delimiters, so a slide
+      containing the closing tag ENDED THE SPAN EARLY: injected instructions landed at the
+      top level of the user message, and a fabricated span id was attributed to the source.
+      Demonstrated, then fixed by neutralising the delimiter sequence in course material
+      (`_neutralise_span_delimiters`). 18 tests in `tests/test_p6_prompt_injection.py`,
+      mutation-verified, plus one opt-in live behavioural check.
+      **Structural containment only.** Text inside a correctly-closed span can still say
+      "ignore previous instructions"; that is model behaviour and is not solved here.
 - [ ] **🟠 `allocation_fidelity` reported for the solver arm** alongside coverage. 29/32/38%
       of placements come from span exhaustion; coverage alone credits the mass thesis for
       exhaustion's work.
