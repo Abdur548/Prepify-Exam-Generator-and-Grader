@@ -382,6 +382,58 @@ reliability figure**, and it must not be reported as one.
   was retired underneath this project and every call 404ed. *Gate:* state time-to-detect and
   time-to-recover. A standby key and a second model are queued and absent.
 
+### MEASURED 2026-09-01 — E8.1-E8.4, 10 runs of `quiz_default`, cache bypassed
+
+`python -m coursegen.eval reliability --runs 10 --no-gates`. 20 live calls, 16,979 tokens.
+
+| dimension | result |
+|---|---|
+| schema pass rate | **100%** across all 10 runs |
+| mcq_hygiene pass rate | **32.5%**  [25.0%–33.3%]  sd 2.6% |
+| items delivered / asked | **50%**, every run |
+| regeneration rescue rate | **9%** of flagged items |
+| determinism (same spec, cache off) | **0%** of slots identical across runs |
+| cost | 2 calls, 1,698 tokens [1,570–2,152], ~6 s per run |
+
+**The single clean run was not representative, and could not have been.** It used
+`ai_fundamentals_v1`, whose MCQ section is `TRUE_FALSE_SERIES` with `options_count: 2` —
+"True" and "False" are 4 and 5 characters and sit inside a ±40% band of their own average
+by construction. That blueprint is structurally incapable of exercising the option-length
+guard. `quiz_default` has real 4-option MCQs, and two thirds of them fail.
+
+### The defect this exposed: `OPTION_LENGTH_BAND` is scale-dependent
+
+Measured on real generated options:
+
+| item | options | avg | allowed | verdict |
+|---|---|---|---|---|
+| A-01 | `Arrays`(6) `Linked lists`(12) `Trees`(5) `Indices`(7) | 7.5 | [4.5, 10.5] | **FAIL** |
+| A-02 | four full sentences, 34–41 chars | 37.8 | [22.6, 52.8] | PASS |
+
+A ±40% *relative* band means ±3 characters on one-word options and ±15 on sentence-length
+ones. One extra word breaks it at short lengths. So the guard rejects
+"Arrays / Linked lists / Trees / Indices" — a well-formed item — while admitting verbose
+ones, **penalising the better MCQ design.**
+
+The guard exists to stop the conspicuously-longer-correct-answer giveaway, which is a
+property of an *outlier among similar options*, not of absolute spread. Two candidate
+fixes, neither applied yet because both change which papers are accepted:
+
+1. Apply the band only above an absolute length (options under ~15 characters cannot
+   give an answer away by length).
+2. Score the outlier rather than the range — deviation of the longest option from the
+   median, or length in words rather than characters.
+
+**Do not simply widen the band.** That trades a false-positive problem for a
+false-negative one and would re-admit the giveaway case the guard was built for.
+
+### Determinism is 0%, and that is expected rather than alarming
+
+No slot produced an identical stem twice with the cache bypassed. The model is sampling at
+temperature; the cache — keyed on `spec_hash` — is what makes a run reproducible, not the
+model. R7's claim is that a manifest plus a warm cache reproduces a paper, and that is
+unaffected. Worth stating so nobody reads 0% as a regression.
+
 ### The disclosure this section must carry
 
 > **Prepify does not currently verify that any generated question is true.**

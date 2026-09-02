@@ -852,8 +852,23 @@ Build order (from the spec):
       blueprints, because it counts distinct nodes and the solver concentrates on dense
       ones. E2's headline is now `mass_coverage_ratio`. Pinned by
       `tests/test_p6_baseline.py::TestTheMetricFinding`.
-- [ ] **🔴 N-run variance harness (E8.1).** Reusable by E1, E3 and E8. One clean run is a
-      data point, not a reliability figure.
+- [x] **DONE 2026-09-01 — `python -m coursegen.eval reliability --runs 10`.**
+      `coursegen/eval/reliability.py`, aggregation tested in `tests/test_p6_reliability.py`
+      (22 tests, no quota). Cache bypassed per run — sharing one would serve every run
+      after the first from cache and report flawless reliability off a single call.
+      Measures E8.1 variance, E8.2 taxonomy, E8.3 regeneration rescue, E8.4 determinism.
+      Results in `P6-EVALUATION.md`.
+
+- [ ] **🔴 `OPTION_LENGTH_BAND` rejects good MCQs — found by the E8 harness.** mcq_hygiene
+      passes only **32.5%** of items over 10 runs, and half of every paper is lost. The band
+      is ±40% RELATIVE, so it is ±3 characters on one-word options and ±15 on sentences:
+      `Arrays / Linked lists / Trees / Indices` fails, four verbose sentences pass. It
+      penalises the better MCQ design.
+      Fix by applying the band only above an absolute length, or by scoring the outlier
+      against the median instead of the range. **Do not just widen it** — that re-admits
+      the conspicuously-longer-correct-answer giveaway the guard exists to catch.
+      This was invisible until now because the only real run used `TRUE_FALSE_SERIES`
+      (2 options, "True"/"False"), which cannot trigger the guard.
 - [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
 - [ ] **🟠 Prompt-injection test (E4.2)** — a lecture slide reading "ignore previous
       instructions" becomes span text and enters the prompt. Untested. Build before any demo

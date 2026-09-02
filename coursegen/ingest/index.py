@@ -101,3 +101,42 @@ def upsert_chunks(
         )
 
     logger.info("Upserted %d chunks into %r", len(chunks), config.QDRANT_COLLECTION_NAME)
+
+
+def read_spans(chunk_ids: list[str], data_dir: Path) -> tuple[dict[str, str], dict[str, tuple[str, int]]]:
+    """Read span text AND provenance back out of Qdrant, in one open.
+
+    `ingest()` persists chunk text and source metadata as payload fields but
+    returns only the course map, so this is the only way to recover the spans an
+    item is generated from — and the only way `source_ref` can be stamped with a
+    real file and page instead of whatever the model invents (it sees only
+    `<source_span id="...">`, so asked to cite, it echoes the delimiter).
+
+    Returns `(text_by_id, source_by_id)`. One call rather than two because Qdrant
+    local mode takes an EXCLUSIVE file lock (S8): every open is a chance to
+    collide with another reader, and the two callers always wanted both maps
+    anyway.
+
+    Lived in `tests/run_exam.py` until 2026-09-01, which made a test-directory
+    script a load-bearing dependency of anything that needed real spans.
+    """
+    client = get_client(data_dir)
+    try:
+        records = client.retrieve(
+            collection_name=config.QDRANT_COLLECTION_NAME,
+            ids=chunk_ids,
+            with_payload=True,
+        )
+    finally:
+        client.close()
+
+    text_by_id: dict[str, str] = {}
+    source_by_id: dict[str, tuple[str, int]] = {}
+    for r in records:
+        payload = r.payload or {}
+        text_by_id[str(r.id)] = payload.get("text", "")
+        source_by_id[str(r.id)] = (
+            payload.get("source_file", "unknown"),
+            int(payload.get("page", 0)),
+        )
+    return text_by_id, source_by_id

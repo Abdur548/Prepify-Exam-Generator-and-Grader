@@ -15,7 +15,7 @@ It also fills a real gap in the product, not just in the plumbing:
 `ingest()` returns CourseMapNodes carrying chunk IDs but not chunk TEXT, while
 `generate_exam()` needs {chunk_id: text}. The text is in the Qdrant payload and
 nothing reads it back — generation has only ever run against hand-built span
-dictionaries in tests. `_span_text_from_qdrant` below is that missing read path,
+dictionaries in tests. `coursegen.ingest.index.read_spans` is that missing read path,
 and it belongs in `ingest/index.py` as a proper helper rather than here.
 
 USAGE — two steps, deliberately separate.
@@ -47,53 +47,11 @@ from coursegen.exam.allocate import solve
 from coursegen.exam.generate import generate_exam
 from coursegen.exam.render import render_exam_artifacts
 from coursegen.ingest.coursemap import ingest, load_course_map
-from coursegen.ingest.index import get_client
+from coursegen.ingest.index import get_client, read_spans
 from coursegen.llm.client import LLMClient
 
 PACKAGE_DIR = Path(coursegen.__file__).resolve().parent
 BLUEPRINT_DIR = PACKAGE_DIR / "exam" / "blueprints"
-
-
-def _span_text_from_qdrant(chunk_ids: list[str], data_dir: Path) -> dict[str, str]:
-    """Read chunk text back out of Qdrant by point id.
-
-    `ingest()` persists the text as a payload field but returns only the course
-    map, so this is the only way to recover the spans an item is generated from.
-    Qdrant local mode holds an exclusive file lock (S8), so the client is closed
-    before anything else opens it.
-    """
-    client = get_client(data_dir)
-    try:
-        records = client.retrieve(
-            collection_name=config.QDRANT_COLLECTION_NAME,
-            ids=chunk_ids,
-            with_payload=True,
-        )
-    finally:
-        client.close()
-    return {str(r.id): (r.payload or {}).get("text", "") for r in records}
-
-
-def _span_source_from_qdrant(chunk_ids: list[str], data_dir: Path) -> dict[str, tuple[str, int]]:
-    """Real file and page per span, so `source_ref` is built by code not invented.
-
-    The model only ever sees `<source_span id="...">`, so asked for a citation it
-    can only echo the id — which is exactly what happened on the first real run.
-    """
-    client = get_client(data_dir)
-    try:
-        records = client.retrieve(
-            collection_name=config.QDRANT_COLLECTION_NAME,
-            ids=chunk_ids,
-            with_payload=True,
-        )
-    finally:
-        client.close()
-    return {
-        str(r.id): ((r.payload or {}).get("source_file", "unknown"),
-                    int((r.payload or {}).get("page", 0)))
-        for r in records
-    }
 
 
 def _print_coverage(report, blueprint: Blueprint) -> None:
@@ -191,8 +149,7 @@ def main() -> int:
         return 1
 
     needed = sorted({sid for s in specs for sid in s.span_ids})
-    span_text = _span_text_from_qdrant(needed, data_dir)
-    span_source = _span_source_from_qdrant(needed, data_dir)
+    span_text, span_source = read_spans(needed, data_dir)
     missing = [sid for sid in needed if not span_text.get(sid)]
     if missing:
         print(f"ERROR: {len(missing)} span(s) had no text in Qdrant, e.g. {missing[:3]}")
