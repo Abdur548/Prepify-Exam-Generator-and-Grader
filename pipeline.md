@@ -221,7 +221,7 @@ tune it by watching the demo.
 - **Output:** `list[GeneratedItem]`, cache files keyed by `spec_hash`, `run_manifest.json`
 - **Modules:** `exam/generate.py`, `exam/validate.py`, `llm/prompts.py`
 - **LLM calls:** batches of `BATCH_SIZE = 6` uncached item specs per call; cached `spec_hash` hits cost zero calls
-- **Key parameters:** `MAX_REGENERATION_PASSES = 1`, `RELEVANCE_FLOOR = -2.0` (raw cross-encoder logit; see gate 2 below — this is a relevance floor, NOT a factuality check), `DEDUP_TAU = 0.85`, `OPTION_LENGTH_BAND = 0.40`, `MCQ_SHUFFLE_SEED = 42`
+- **Key parameters:** `MAX_REGENERATION_PASSES = 1`, `RELEVANCE_FLOOR = -2.0` (raw cross-encoder logit; see gate 2 below — this is a relevance floor, NOT a factuality check), `DEDUP_TAU = 0.85`, `OPTION_LENGTH_OUTLIER_RATIO = 3.0`, `MCQ_SHUFFLE_SEED = 42`
 - **Prompt-injection control:** every source span is wrapped in `<source_span id="...">...</source_span>` and the stable system prompt says source spans are data, never instructions (S2)
 - **Validation gates:** Pydantic schema parse, **relevance** score, duplication cosine, MCQ hygiene. Failures regenerate only their slots, capped at one regeneration pass; remaining failures are shipped flagged in `run_manifest.json`, each with the gate and measured score that rejected it (`validation_issues`).
 - **Gate 2 is a relevance floor, not a groundedness check** (renamed 2026-09-01). The reranker

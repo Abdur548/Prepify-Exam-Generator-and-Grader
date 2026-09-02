@@ -859,27 +859,13 @@ Build order (from the spec):
       Measures E8.1 variance, E8.2 taxonomy, E8.3 regeneration rescue, E8.4 determinism.
       Results in `P6-EVALUATION.md`.
 
-- [ ] **🔴 `OPTION_LENGTH_BAND` rejects good MCQs — found by the E8 harness.** mcq_hygiene
-      passes only **32.5%** of items over 10 runs, and half of every paper is lost. The band
-      is ±40% RELATIVE, so it is ±3 characters on one-word options and ±15 on sentences:
-      `Arrays / Linked lists / Trees / Indices` fails, four verbose sentences pass. It
-      penalises the better MCQ design.
-      **MEASURED 2026-09-01 — use max/median, not the range.** Per R9, the signal was
-      checked for separation before any threshold was proposed. Against three synthetic
-      giveaways (the case the guard exists for) and four legitimate option sets:
+- [x] **FIXED 2026-09-01 — replaced with `OPTION_LENGTH_OUTLIER_RATIO = 3.0`.**
+      Longest option ÷ median of the others: scale-free, so it treats four one-word options
+      the same as four sentences. Re-measured over 10 runs — mcq_hygiene 32.5% → **93.3%**,
+      items delivered 50% → **100%**, regeneration rescue 9% → **100%**.
+      Threshold remains PROVISIONAL: it sits in a gap measured over 7 cases and wants ~50
+      hand-labelled real items before it is settled.
 
-      | rule | giveaway | legitimate | separates? |
-      |---|---|---|---|
-      | current ±40% range | fails all 3 | **fails 1 of 4** (one-word sets) | NO |
-      | longest / median of the rest | 3.81–5.67 | 1.11–2.00 | **YES**, gap 1.81 |
-
-      `max/median` measures what the guard is actually about — ONE option standing out —
-      and is scale-free, so it behaves the same on `Trees / Arrays / Indices` as on four
-      full sentences. Midpoint of the observed gap is 2.90; a threshold near 2.5–3.0 is
-      indicated, but calibrate on more than 7 cases before shipping a number.
-      Real items measured: 2 of 4 rejected by the current rule, both short-option sets.
-      This was invisible until now because the only real run used `TRUE_FALSE_SERIES`
-      (2 options, "True"/"False"), which cannot trigger the guard.
 - [ ] **🟠 Browser end-to-end gate (E7.1)** — also closes P5's outstanding gate.
 - [x] **DONE 2026-09-01 — and it found a real hole, not just a missing test.**
       Span text was interpolated raw between `<source_span>` delimiters, so a slide

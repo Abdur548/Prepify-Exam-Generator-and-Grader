@@ -223,6 +223,43 @@ def _groundedness_claim(spec: ItemSpec, item: GeneratedItem) -> str:
     return item.model_answer
 
 
+def _option_length_outlier_ratio(sorted_lengths: list[int]) -> float:
+    """Longest option divided by the median of the others. 1.0 means no outlier.
+
+    Replaced a +/-40% band around the mean on 2026-09-01. That rule was
+    SCALE-DEPENDENT: 40% of a 5-character option is two characters, so one extra
+    word broke it, while 40% of a 40-character sentence is sixteen characters of
+    slack. It therefore rejected `Trees / Arrays / Indices / Linked lists` -- a
+    good item -- and accepted four padded sentences, penalising the better MCQ
+    design. Measured on real output, it failed 2 of 4 items, both short-option
+    sets, and drove mcq_hygiene to a 32.5% pass rate over ten runs.
+
+    What the guard is actually for is ONE option standing out far enough that a
+    student picks it without reading the stem. That is a property of an outlier
+    against its peers, not of absolute spread, so the median of the OTHER options
+    is the right reference: it is unmoved by the outlier itself, where the mean is
+    dragged toward it and hides the very thing being measured.
+
+    Scale-free by construction -- four one-word options and four sentences with
+    the same shape score the same.
+
+    Known limitation: this catches a conspicuously LONG option only. A
+    conspicuously short one is a weaker tell and was not measured, so it is not
+    guarded (R9 -- do not add a threshold for a signal you have not checked).
+    """
+    if len(sorted_lengths) < 2:
+        return 1.0
+    others = sorted_lengths[:-1]
+    mid = len(others) // 2
+    median_of_others = (
+        others[mid] if len(others) % 2
+        else (others[mid - 1] + others[mid]) / 2
+    )
+    if median_of_others <= 0:
+        return float("inf")
+    return sorted_lengths[-1] / median_of_others
+
+
 def _mcq_hygiene_issue(item: GeneratedItem) -> str | None:
     if item.options is None or item.correct_option is None:
         return "MCQ requires options and correct_option"
@@ -232,14 +269,15 @@ def _mcq_hygiene_issue(item: GeneratedItem) -> str | None:
     if any("all of the above" in t or "none of the above" in t for t in lowered):
         return "all/none of the above is not allowed"
 
-    lengths = [len(t) for t in option_texts if t]
+    lengths = sorted(len(t) for t in option_texts if t)
     if not lengths:
         return "options are empty"
-    avg = sum(lengths) / len(lengths)
-    min_allowed = avg * (1.0 - config.OPTION_LENGTH_BAND)
-    max_allowed = avg * (1.0 + config.OPTION_LENGTH_BAND)
-    if any(length < min_allowed or length > max_allowed for length in lengths):
-        return "option lengths outside configured band"
+    ratio = _option_length_outlier_ratio(lengths)
+    if ratio > config.OPTION_LENGTH_OUTLIER_RATIO:
+        return (
+            f"longest option is {ratio:.2f}x the median of the others, above "
+            f"OPTION_LENGTH_OUTLIER_RATIO={config.OPTION_LENGTH_OUTLIER_RATIO}"
+        )
 
     normalised = [_normalise_option(t) for t in option_texts]
     if len(set(normalised)) != len(normalised):

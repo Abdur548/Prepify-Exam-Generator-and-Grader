@@ -427,6 +427,29 @@ fixes, neither applied yet because both change which papers are accepted:
 **Do not simply widen the band.** That trades a false-positive problem for a
 false-negative one and would re-admit the giveaway case the guard was built for.
 
+### FIXED 2026-09-01 — re-measured after replacing the rule
+
+`OPTION_LENGTH_BAND = 0.40` (±40% around the mean) replaced with
+`OPTION_LENGTH_OUTLIER_RATIO = 3.0` (longest ÷ median of the others). Same harness,
+same blueprint, 10 runs:
+
+| metric | before | after |
+|---|---|---|
+| mcq_hygiene pass rate | 32.5%  [25.0–33.3]  sd 2.6 | **93.3%**  [66.7–100]  sd 14.1 |
+| items delivered / asked | 50%, every run | **100%**, every run |
+| regeneration rescue rate | 9% | **100%** |
+| calls per run | 2.0 | 1.2 |
+| schema | 100% | 100% (unchanged) |
+
+The residual 6.7% still fails on a single run, and regeneration now rescues all of it —
+which is what a retry budget is for. Variance rose (sd 2.6 → 14.1) because the failure is
+now occasional rather than systematic; a rate that is consistently bad has low variance.
+
+Fewer calls per run because fewer items need regenerating.
+
+**Still provisional.** The 3.0 threshold sits in a gap measured over 7 cases. It wants ~50
+real items with giveaways labelled by hand before it is treated as settled.
+
 ### Determinism is 0%, and that is expected rather than alarming
 
 No slot produced an identical stem twice with the cache bypassed. The model is sampling at

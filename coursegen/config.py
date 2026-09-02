@@ -232,7 +232,28 @@ BATCH_SIZE: int = 6                  # item specs per LLM call
 RELEVANCE_FLOOR: float = -2.0
 
 DEDUP_TAU: float = 0.85              # UNIT: cosine similarity in [-1, 1]. Genuine similarity — correct as-is.
-OPTION_LENGTH_BAND: float = 0.40     # ±40% MCQ option length
+# Longest MCQ option / median of the others. Above this, the item is rejected:
+# one option standing out is answerable without reading the stem.
+#
+# Replaced OPTION_LENGTH_BAND = 0.40 (a +/-40% band around the mean) on
+# 2026-09-01. That rule was scale-dependent and rejected 2 of 4 real items, both
+# legitimate one-word option sets, holding mcq_hygiene to a 32.5% pass rate.
+#
+# 3.0 sits in a measured gap (R9 -- separation checked BEFORE a number was
+# chosen). Against 3 synthetic giveaways and 4 legitimate sets:
+#
+#     giveaway   [5,6,7,34] 5.67   [18,20,22,95] 4.75   [40,42,45,160] 3.81
+#     legitimate [5,6,7,12] 2.00   [11,14,16,19] 1.36   [34,37,39,41] 1.11
+#                [70,78,84,91] 1.17
+#
+# Legitimate tops out at 2.00, giveaway starts at 3.81; midpoint 2.90. 3.0 leaves
+# 1.0 of margin above the worst legitimate case and 0.81 below the mildest
+# giveaway, leaning slightly toward accepting -- a false positive costs a whole
+# question, and the 32.5% pass rate showed what that costs in aggregate.
+#
+# PROVISIONAL. Seven cases is a demonstration, not a calibration set. Before this
+# is treated as settled it wants ~50 real items with giveaways labelled by hand.
+OPTION_LENGTH_OUTLIER_RATIO: float = 3.0
 # Base seed for MCQ option shuffling. It is combined with the item's slot_id per
 # item — seeding a fresh Random with this constant alone gives EVERY question the
 # same permutation, so an LLM's habit of emitting the correct answer first puts the

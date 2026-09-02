@@ -16,7 +16,7 @@ Nine guards, seven caught, two not:
     SYNTHESIS_ITEM_WARN_RATIO    caught  test_a_paper_over_the_ratio_warns
     COGNITIVE_BALANCE_TOLERANCE  caught  test_divergence_warns_and_does_not_raise
     EQUATION_MIN_MATH_CHARS      caught  test_math_unicode_flagged
-    OPTION_LENGTH_BAND           NOT CAUGHT
+    OPTION_LENGTH_BAND           NOT CAUGHT  (since replaced by the outlier ratio)
     RERANKER_THRESHOLD           NOT CAUGHT
 
 This file covers the two that were not.
@@ -29,7 +29,7 @@ happened once already — a `-1.0` scorer fixture was a rejection at `TAU=3.5` a
 became a pass at `RELEVANCE_FLOOR=-2.0`, going green while asserting nothing.
 
 So every value below is computed FROM the constant it exercises. If someone moves
-`RERANKER_THRESHOLD` or `OPTION_LENGTH_BAND`, these tests move with it and keep
+`RERANKER_THRESHOLD` or `OPTION_LENGTH_OUTLIER_RATIO`, these tests move with it and keep
 testing the boundary rather than a number that used to be near it.
 """
 from __future__ import annotations
@@ -88,29 +88,23 @@ class TestRerankerThresholdDefault:
 
 
 # ---------------------------------------------------------------------------
-# OPTION_LENGTH_BAND — via _mcq_hygiene_issue()
+# OPTION_LENGTH_OUTLIER_RATIO — via _mcq_hygiene_issue()
 # ---------------------------------------------------------------------------
 
-def _outlier_length(base_len: int, n_options: int) -> int:
-    """Smallest outlier length that pushes the short options below the band.
+def _giveaway_lengths(base_len: int, n_options: int) -> list[int]:
+    """Option lengths whose longest entry breaches OPTION_LENGTH_OUTLIER_RATIO.
 
-    Solved rather than guessed, so the test tracks the constant:
+    Derived from the constant, not written down. The rule is
+    `longest / median(others) > ratio`, and with every other option at
+    `base_len` the median of the others IS `base_len`, so the outlier only has to
+    exceed `base_len * ratio`.
 
-        min_allowed = avg * (1 - band),  avg = ((n-1)*L + K) / n
-
-    the short options fall outside when  L < avg * (1 - band), i.e.
-
-        K > L * (n - (1 - band)(n - 1)) / (1 - band)
-
-    A hardcoded "make one option 100 chars" would stop triggering if the band
-    widened, and the test would pass while checking nothing — the exact failure
+    A hardcoded "make one option 100 characters" would stop breaching if the ratio
+    were raised, and the test would pass while checking nothing — the exact failure
     this file exists to prevent.
     """
-    band = config.OPTION_LENGTH_BAND
-    if band >= 1.0:  # a band that wide admits everything; no outlier exists
-        pytest.skip(f"OPTION_LENGTH_BAND={band} admits any length")
-    k = base_len * (n_options - (1 - band) * (n_options - 1)) / (1 - band)
-    return int(k) + 2  # strictly greater, plus a margin for integer rounding
+    ratio = config.OPTION_LENGTH_OUTLIER_RATIO
+    return [base_len] * (n_options - 1) + [int(base_len * ratio) + 2]
 
 
 def _item_with_option_lengths(lengths: list[int]):
@@ -133,43 +127,62 @@ def _item_with_option_lengths(lengths: list[int]):
     )
 
 
-class TestOptionLengthBand:
-    """The MCQ option-length band had NO test at all.
+class TestOptionLengthOutlier:
+    """The MCQ option-length guard had NO test at all until 2026-09-01.
 
-    Disabling it entirely — `min_allowed = 0`, `max_allowed = inf` — broke nothing
-    in the suite. The gate exists because a conspicuously longer option is a
-    giveaway: students answer it without reading the question, and the item stops
-    measuring anything.
+    Disabling it broke nothing in the suite. It exists because one conspicuously
+    longer option is a giveaway: students pick it without reading the stem, and
+    the item stops measuring anything.
+
+    The rule it now enforces is `longest / median(others)`. The previous +/-40%
+    band around the MEAN was scale-dependent — two characters of slack on one-word
+    options, sixteen on sentences — so it rejected legitimate short-option items
+    and held mcq_hygiene to a 32.5% pass rate over ten real runs.
     """
 
-    def test_options_outside_the_band_are_rejected(self) -> None:
+    def test_a_conspicuous_outlier_is_rejected(self) -> None:
         from coursegen.exam.validate import _mcq_hygiene_issue
-        lengths = [20, 20, 20, _outlier_length(20, 4)]
+        lengths = _giveaway_lengths(20, 4)
         issue = _mcq_hygiene_issue(_item_with_option_lengths(lengths))
         assert issue is not None, (
-            f"lengths {lengths} should breach OPTION_LENGTH_BAND="
-            f"{config.OPTION_LENGTH_BAND} but were accepted"
+            f"lengths {lengths} should breach OPTION_LENGTH_OUTLIER_RATIO="
+            f"{config.OPTION_LENGTH_OUTLIER_RATIO} but were accepted"
         )
-        assert "band" in issue.lower()
+        assert "median" in issue.lower()
 
     def test_equal_length_options_are_accepted(self) -> None:
-        """The other side of the boundary: the guard must not reject a clean item."""
         from coursegen.exam.validate import _mcq_hygiene_issue
         assert _mcq_hygiene_issue(_item_with_option_lengths([20, 20, 20, 20])) is None
 
-    def test_variation_inside_the_band_is_accepted(self) -> None:
-        """Real options are never identical in length; mild variation must pass.
+    def test_the_rule_is_scale_free(self) -> None:
+        """The regression that motivated the change.
 
-        Sized from the constant at half the permitted deviation, so it stays
-        comfortably inside whatever the band is set to.
+        `Trees / Arrays / Indices / Linked lists` — real generated output — was
+        rejected by the old band purely because the options were short. The same
+        SHAPE at sentence length passed. Both must now pass.
         """
-        base = 40
-        delta = int(base * config.OPTION_LENGTH_BAND * 0.5)
-        lengths = [base - delta, base, base, base + delta]
-        assert _mcq_hygiene_issue_for(lengths) is None, (
-            f"lengths {lengths} are within OPTION_LENGTH_BAND="
-            f"{config.OPTION_LENGTH_BAND} but were rejected"
+        from coursegen.exam.validate import _mcq_hygiene_issue
+        short = [5, 6, 7, 12]                       # the real A-01 that was rejected
+        long_ = [n * 6 for n in short]              # identical shape, 6x the scale
+        assert _mcq_hygiene_issue(_item_with_option_lengths(short)) is None, (
+            "a legitimate one-word option set is still rejected"
         )
+        assert _mcq_hygiene_issue(_item_with_option_lengths(long_)) is None
+        assert _mcq_hygiene_issue(_item_with_option_lengths([n * 12 for n in short])) is None
+
+    def test_a_giveaway_is_caught_at_every_scale(self) -> None:
+        """Scale-free in the other direction: the same outlier shape must fail small and large."""
+        from coursegen.exam.validate import _mcq_hygiene_issue
+        for base in (5, 20, 60):
+            lengths = _giveaway_lengths(base, 4)
+            assert _mcq_hygiene_issue(_item_with_option_lengths(lengths)) is not None, (
+                f"giveaway at base length {base} was accepted: {lengths}"
+            )
+
+    def test_two_option_true_false_is_unaffected(self) -> None:
+        """TRUE_FALSE_SERIES items are 2 options of 4 and 5 characters."""
+        from coursegen.exam.validate import _mcq_hygiene_issue
+        assert _mcq_hygiene_issue(_item_with_option_lengths([4, 5])) is None
 
 
 def _mcq_hygiene_issue_for(lengths: list[int]):
