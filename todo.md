@@ -1023,13 +1023,39 @@ recorded, so that "we know about it" does not decay into "we forgot about it".
 - [ ] **🔴 Add an opt-in test that runs the REAL embedder** on two or three chunks, marked like
       `--live` so it stays out of the default run. "The model actually runs" is currently proven
       nowhere, and that is how the above survived four days and 375 green tests.
-- [ ] **🔴 Audit fixtures that encode a threshold's current value.** Changing
-      `RELEVANCE_FLOOR` silently converted `test_groundedness_gate_flags_low_score` into a
-      test that asserted nothing: its −1.0 fixture was a rejection at TAU=3.5 and a pass at
-      −2.0. It surfaced only by luck, failing on an unrelated rename. Any test whose fixture
-      sits near a constant has the same failure mode — it goes green while checking nothing.
-      Sweep for fixtures chosen relative to `DEDUP_TAU`, `RERANKER_THRESHOLD`,
-      `OPTION_LENGTH_BAND`, `TOPIC_MATCH_*`, and mutation-test each one.
+- [x] **DONE 2026-09-01 — and the premise was half wrong.** Audited by mutation: every
+      guard comparing against a config threshold was disabled in turn and the suite re-run.
+      A guard whose removal breaks nothing is a guard no test exercises.
+
+      **The fixtures were mostly fine.** Scorer lambdas sit at ±10.0 and ±999.0 against a
+      −2.0 floor (margins 12 and 997), and `test_a01_topic_allocation.py` already asserts
+      relative to `config.TOPIC_MATCH_*`. The one vacuous fixture found earlier was
+      isolated, not a pattern. Fixtures that are already sound were left alone.
+
+      **The real defect was uncovered guards — 5 of 14 audited.**
+
+      | guard | result |
+      |---|---|
+      | RELEVANCE_FLOOR, DEDUP_TAU, TOPIC_MATCH_MIN_EVIDENCE, TOPIC_MATCH_RELATIVE_FLOOR | covered |
+      | SYNTHESIS_ITEM_WARN_RATIO, COGNITIVE_BALANCE_TOLERANCE, EQUATION_MIN_MATH_CHARS | covered |
+      | MAX_DECOMPRESSED_SIZE_BYTES (zip bomb), MIN_FREE_VIRTUAL_MEMORY_GB | covered |
+      | **OPTION_LENGTH_BAND** | **no test at all** |
+      | **RERANKER_THRESHOLD** | **default path never exercised** |
+      | **MAX_FILE_SIZE_BYTES, MAX_PAGES (pdf), MAX_PAGES (pptx)** | **no test at all** |
+
+      `RERANKER_THRESHOLD` was the worst: `should_use_material` was tested only with
+      explicit thresholds, so the default that production uses could change without
+      failing anything — and that function sets `from_material`, the claim that an answer
+      came from the student's own material.
+
+      Writing the PDF test found a **use-after-close bug**: the oversized-PDF guard called
+      `doc.close()` then read `doc.page_count` in its own error message, so the user got
+      "document closed" instead of the limit. Fixed.
+
+      All five closed in `tests/test_threshold_guards.py` (12 tests), every fixture derived
+      from the constant it exercises, and each mutation-verified to catch the disablement
+      that previously slipped through. Suite 409 → 421.
+
 - [x] **DISCONNECTED 2026-09-01 — deferred to Finishing touches, not fixed.** `coverage_ratio`
       is no longer returned by `/api/exam` and no longer shown in the UI, because it reported
       **0.04** on a paper that was 20/20 items and 100/100 marks. It remains on `CoverageReport`

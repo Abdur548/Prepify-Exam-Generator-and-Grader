@@ -188,10 +188,21 @@ def _parse_pdf(path: Path) -> ParsedDocument:
     except Exception as exc:
         raise ValueError(f"PyMuPDF could not open {path.name}: {exc}") from exc
 
-    if doc.page_count > config.MAX_PAGES:
+    # Read the count BEFORE closing. `doc.close()` invalidates the handle, so
+    # reading `doc.page_count` inside the f-string raised
+    # ValueError("document closed") and that message replaced the real one — a
+    # user uploading an oversized PDF was told "document closed", which names
+    # neither the limit nor the cause. The guard fired correctly and then
+    # destroyed its own diagnostic.
+    #
+    # Found by writing the first test for this guard (2026-09-01). A mutation
+    # audit showed disabling it entirely broke nothing, so nothing had ever
+    # exercised the failure path.
+    page_count = doc.page_count
+    if page_count > config.MAX_PAGES:
         doc.close()
         raise ValueError(
-            f"{path.name}: {doc.page_count} pages exceeds MAX_PAGES={config.MAX_PAGES}"
+            f"{path.name}: {page_count} pages exceeds MAX_PAGES={config.MAX_PAGES}"
         )
 
     for page_idx in range(doc.page_count):
