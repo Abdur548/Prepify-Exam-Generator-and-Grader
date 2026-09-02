@@ -876,10 +876,13 @@ Build order (from the spec):
       mutation-verified, plus one opt-in live behavioural check.
       **Structural containment only.** Text inside a correctly-closed span can still say
       "ignore previous instructions"; that is model behaviour and is not solved here.
-- [ ] **🟠 `allocation_fidelity` reported for the solver arm** alongside coverage. 29/32/38%
+- [x] **DONE 2026-09-01** — reported per arm by `coursegen/eval/harness.py`, and the report
+      warns when it drops below 0.7 (it fired on `final_default` at 0.66). Was: **🟠 `allocation_fidelity` reported for the solver arm** alongside coverage. 29/32/38%
       of placements come from span exhaustion; coverage alone credits the mass thesis for
       exhaustion's work.
-- [ ] **🟠 `solver_flat` arm** — flat `token_count` vs `instructional_mass`, to test §16's
+- [x] **DONE 2026-09-01** — third arm in the harness, scored on TRUE mass so it is not
+      graded on its own objective. §16 answered: the repetition term supplies 4.9–8.5%.
+      Was: **🟠 `solver_flat` arm** — flat `token_count` vs `instructional_mass`, to test §16's
       falsification condition rather than assume it.
 
 ---
@@ -954,7 +957,8 @@ recorded, so that "we know about it" does not decay into "we forgot about it".
       `_KEY_RE` and GitHub push protection. Replaced with `_TEST_API_KEY`.
       `test_p0_client.py` keeps a realistic-shaped key on purpose — it asserts redaction
       catches one.
-- [ ] **🟠 `coverage_ratio` is now user-facing and answers the wrong question.** It reported
+- [x] **SUPERSEDED 2026-09-01** — disconnected from the API and UI; redefinition tracked
+      under Finishing touches. Was: **🟠 `coverage_ratio` is now user-facing and answers the wrong question.** It reported
       **0.04 for a 100%-complete paper**, because it measures against the whole corpus while
       an authored blueprint asks for five specific topics. It is in the `/api/exam` response
       and on the UI. Already queued as "decide before P6" — P5 puts it on a student's screen
@@ -973,7 +977,8 @@ recorded, so that "we know about it" does not decay into "we forgot about it".
       web request it is the default case: two users, or one impatient user clicking twice,
       corrupt each other's papers. **Per-run output directories, or a lock, before wiring
       `_run_exam_pipeline`.**
-- [ ] **🟠 `_span_source_from_qdrant` lives in `tests/run_exam.py` and P5 needs it.** Real
+- [x] **DONE 2026-09-01** — moved into `coursegen/ingest/index.py` as `read_spans()`, one
+      Qdrant open instead of two. Was: **🟠 `_span_source_from_qdrant` lives in `tests/run_exam.py` and P5 needs it.** Real
       citations depend on reading `source_file` / `page` back from the chunk payload. That
       read path belongs in `ingest/index.py` alongside `_span_text_from_qdrant`; both are
       currently squatting in a test-directory script that P5 is meant to replace.
