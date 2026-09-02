@@ -7,6 +7,29 @@ import requests
 from playwright.sync_api import Page, expect
 from pathlib import Path
 
+# How long to wait for the server to answer /api/health before giving up.
+#
+# Sized from measurement, not guessed. The app's `_lifespan` runs
+# `run_preflight_checks()` before uvicorn accepts connections, and that costs
+# **4.97 s on a cold process** (0.22 s once warm) because it imports WeasyPrint,
+# which drags in GTK. The original budget was 20 attempts x 0.5 s = 10 s, i.e.
+# 2x a 5 s startup — too thin under any load, and the observed flake was ~20%
+# (1 failure in 5 runs, always the slowest run).
+_SERVER_START_TIMEOUT_S = 60.0
+_SERVER_POLL_INTERVAL_S = 0.25
+
+# Default for assertions that do not set their own. Playwright's built-in default
+# is 5 s, which is generous for a mocked call on an idle machine and marginal for
+# one on a loaded one. Every assertion here except the ingest wait is against a
+# mocked backend, so this only has to absorb browser scheduling jitter.
+_DEFAULT_ASSERTION_TIMEOUT_MS = 15_000
+
+# The ingest wait is the one real backend call in this test. Measured at
+# 25.2-25.8 s across three cold runs (dominated by the BGE-M3 load, not by
+# embedding two pages), so 90 s is ~3.5x the measured cost.
+_INGEST_TIMEOUT_MS = 90_000
+
+
 # Provide a live server for Playwright to test against
 @pytest.fixture(scope="session")
 def live_server_url():
@@ -15,23 +38,45 @@ def live_server_url():
     s.bind(('', 0))
     port = s.getsockname()[1]
     s.close()
-    
+
     from coursegen.app.main import app
     def run_server():
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="critical")
-        
+
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
-    
+
     url = f"http://127.0.0.1:{port}"
-    # Wait for server to start
-    for _ in range(20):
+
+    # Poll against a wall-clock deadline, and FAIL LOUDLY if the server never
+    # comes up. The previous loop had three defects, each of which turns a
+    # startup problem into a misleading downstream failure:
+    #
+    #   1. It counted attempts rather than elapsed time, so its real budget
+    #      depended on how fast the failures came back.
+    #   2. A non-200 response skipped the sleep entirely, burning every
+    #      remaining attempt in microseconds.
+    #   3. On exhaustion it returned the URL ANYWAY. The test then failed at
+    #      some later locator with "element not found", which reads like a UI
+    #      bug and is not one. A test that dies here should say so here.
+    deadline = time.monotonic() + _SERVER_START_TIMEOUT_S
+    last_error = "no attempt completed"
+    while time.monotonic() < deadline:
         try:
-            if requests.get(f"{url}/api/health").status_code == 200:
+            resp = requests.get(f"{url}/api/health", timeout=5)
+            if resp.status_code == 200:
                 break
-        except Exception:
-            time.sleep(0.5)
-            
+            last_error = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+        time.sleep(_SERVER_POLL_INTERVAL_S)
+    else:
+        raise RuntimeError(
+            f"uvicorn did not answer {url}/api/health within "
+            f"{_SERVER_START_TIMEOUT_S:.0f}s (last: {last_error}). Startup runs "
+            f"run_preflight_checks(), which imports WeasyPrint/GTK and takes ~5s cold."
+        )
+
     return url
 
 
@@ -39,7 +84,18 @@ def test_browser_end_to_end_flow(page: Page, live_server_url: str, native_pdf: P
     """
     Browser E2E gate (E7.1): upload -> ingest -> generate -> download -> chat.
     This test verifies the frontend Vanilla JS UI coordinates correctly with the backend.
+
+    **Scope, stated plainly so nobody reads more into a green run than it earns.**
+    `_run_exam_pipeline` and `_run_chat_query` are MOCKED, so generation and chat
+    are not exercised here — only the UI's handling of their responses. Ingest is
+    real. This does NOT close P5's declared gate, which asks for the real flow;
+    P5 stays PARTIAL until generation and chat run unmocked. What it does earn is
+    the only coverage of the file a browser actually executes: a regex edit once
+    left `index.html` with a SyntaxError while 385 other tests stayed green.
+
+    "Download" below is asserted as *link present*, not as a file fetched.
     """
+    page.set_default_timeout(_DEFAULT_ASSERTION_TIMEOUT_MS)
     # Mock the backend heavy lifters so the UI can run quickly without real models or API keys
     with patch("coursegen.app.main._run_exam_pipeline") as mock_generate, \
          patch("coursegen.app.main._run_chat_query") as mock_chat, \
@@ -77,7 +133,7 @@ def test_browser_end_to_end_flow(page: Page, live_server_url: str, native_pdf: P
         # Upload & Ingest
         page.locator("#upload-files").set_input_files(str(native_pdf))
         page.locator("#btn-ingest").click()
-        expect(page.locator("#ingest-status")).to_contain_text("Ingested", timeout=60000)
+        expect(page.locator("#ingest-status")).to_contain_text("Ingested", timeout=_INGEST_TIMEOUT_MS)
         
         # Generate Exam
         page.locator("#blueprint-select").select_option("quiz_default")
@@ -85,7 +141,7 @@ def test_browser_end_to_end_flow(page: Page, live_server_url: str, native_pdf: P
         page.locator("#btn-generate").click()
         
         # Wait for generate success
-        expect(page.locator("#generate-status")).to_contain_text("Done", timeout=60000)
+        expect(page.locator("#generate-status")).to_contain_text("Done", timeout=_DEFAULT_ASSERTION_TIMEOUT_MS)
         expect(page.locator("#dl-exam-html")).to_be_visible()
         
         # Chat
