@@ -287,7 +287,7 @@ class TestDegradedMode:
         
         with patch("coursegen.app.main._get_reranker"), \
              patch("coursegen.app.main._get_embed_model"), \
-             patch("coursegen.app.main._fetch_spans", return_value=({}, {})), \
+             patch("coursegen.ingest.index.read_spans", return_value=({}, {})), \
              patch("coursegen.ingest.coursemap.load_course_map", return_value=[]), \
              patch("coursegen.exam.allocate.solve", return_value=([spec1, spec2], MagicMock())):
             
@@ -418,10 +418,10 @@ class TestExamPipelineWiring:
         )
         fake_result = GenerationResult(items=[], manifest={})
 
-        with patch("coursegen.app.main._load_blueprint", return_value=blueprint), \
+        with patch("coursegen.pipeline.load_blueprint", return_value=blueprint), \
              patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes), \
              patch("coursegen.exam.allocate.solve", return_value=(specs, coverage)), \
-             patch("coursegen.app.main._fetch_spans", return_value=({}, {})), \
+             patch("coursegen.ingest.index.read_spans", return_value=({}, {})), \
              patch("coursegen.exam.generate.generate_exam", return_value=fake_result), \
              patch("coursegen.exam.render.render_exam_artifacts", return_value=fake_artifacts):
             result = _run_exam_pipeline("quiz_default", "My Exam")
@@ -465,10 +465,10 @@ class TestExamPipelineWiring:
             answer_key_pdf=tmp_path / "answer_key.pdf",
         )
 
-        with patch("coursegen.app.main._load_blueprint", return_value=blueprint), \
+        with patch("coursegen.pipeline.load_blueprint", return_value=blueprint), \
              patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes), \
              patch("coursegen.exam.allocate.solve", return_value=(specs, coverage)), \
-             patch("coursegen.app.main._fetch_spans", return_value=({}, {})), \
+             patch("coursegen.ingest.index.read_spans", return_value=({}, {})), \
              patch("coursegen.app.main._get_reranker"), \
              patch("coursegen.app.main._get_embed_model"), \
              patch("coursegen.exam.generate.generate_exam",

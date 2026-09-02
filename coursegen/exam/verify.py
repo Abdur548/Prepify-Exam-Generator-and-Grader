@@ -105,11 +105,28 @@ class Verdict:
 def _claim(item: GeneratedItem) -> str:
     """The assertion an item makes, as one sentence a reader could check.
 
-    Stem plus answer, because for a selection item the answer alone is a LABEL
-    carrying no content — the same reason gate 2 destroyed an entire TRUE/FALSE
-    section by scoring the word "True" against a lecture slide.
+    For an MCQ this must resolve `correct_option` to the option's TEXT. Adding the
+    stem is not enough: an MCQ's `model_answer` is the bare label "A", so the claim
+    reads "...what does the agent state represent? Answer: A", which states
+    nothing and is correctly judged NOT_STATED.
+
+    Caught on the first real end-to-end run of this gate (2026-09-02): 5 of 7 items
+    came back NOT_STATED, and every one was an MCQ whose claim was a letter. That
+    looked like the model drifting from its source and was entirely an artefact of
+    this function. It is the same mistake that destroyed a whole TRUE_FALSE section
+    under gate 2 — scoring a label instead of a claim — made a second time, one
+    layer further in.
+
+    Resolution is by label AFTER `_shuffle_options` has relabelled by position and
+    remapped `correct_option`, so the two always agree.
     """
-    return f"{item.stem.strip()} Answer: {item.model_answer.strip()}"
+    answer = item.model_answer.strip()
+    if item.options and item.correct_option:
+        answer = next(
+            (o.text.strip() for o in item.options if o.label == item.correct_option),
+            answer,   # correct_option naming no option: MCQ hygiene rejects that
+        )
+    return f"{item.stem.strip()} Answer: {answer}"
 
 
 def verify_items(

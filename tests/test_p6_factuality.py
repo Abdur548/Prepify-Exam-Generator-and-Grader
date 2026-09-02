@@ -200,3 +200,53 @@ class TestLiveSeparation:
         retained = [sid for sid, _s, _a in true_claims
                     if out.get(sid) and out[sid].is_supported]
         assert retained, "the verifier rejected every true claim; it would empty every paper"
+
+
+class TestMCQClaimResolution:
+    """An MCQ's `model_answer` is a LABEL. The claim must carry the option TEXT.
+
+    Regression for the bug this gate shipped with: on its first real run, 5 of 7
+    items came back NOT_STATED and every one was an MCQ whose claim read
+    "...what does the agent state represent? Answer: A". The verifier was right;
+    the claim was meaningless. That looked like the model drifting from its
+    source and was entirely an artefact of claim construction — the same mistake
+    gate 2 made with "True", one layer further in.
+    """
+
+    def _mcq(self, correct: str = "B") -> GeneratedItem:
+        from coursegen.contracts.item import MCQOption
+        return GeneratedItem(
+            slot_id="A-01",
+            stem="Which strategy expands the lowest-cost node?",
+            options=[
+                MCQOption(label="A", text="Depth-first search"),
+                MCQOption(label="B", text="Uniform-cost search"),
+                MCQOption(label="C", text="Greedy best-first search"),
+            ],
+            correct_option=correct,
+            model_answer=correct,
+            explanation="because",
+            source_ref=SourceRef(file="deck.pdf", pages=[1]),
+        )
+
+    def test_the_claim_carries_the_option_text_not_the_label(self) -> None:
+        client = _client([{"index": 0, "verdict": SUPPORTED, "quote": "q"}])
+        verify_items([(_spec("A-01"), self._mcq("B"))], {"c1": "passage"}, client)
+        sent = client.call.call_args[0][0][1]["content"]
+        assert "Uniform-cost search" in sent, "the claim was sent as a bare label"
+        assert "Answer: B" not in sent
+
+    def test_it_follows_correct_option_after_shuffling(self) -> None:
+        """`_shuffle_options` relabels by position and remaps `correct_option`."""
+        client = _client([{"index": 0, "verdict": SUPPORTED, "quote": "q"}])
+        verify_items([(_spec("A-01"), self._mcq("C"))], {"c1": "passage"}, client)
+        sent = client.call.call_args[0][0][1]["content"]
+        assert "Greedy best-first search" in sent
+
+    def test_a_written_answer_is_used_verbatim(self) -> None:
+        """Non-MCQ items already carry their content in model_answer."""
+        client = _client([{"index": 0, "verdict": SUPPORTED, "quote": "q"}])
+        verify_items([(_spec("A-01"), _item("A-01", answer="Shallowest nodes first."))],
+                     {"c1": "passage"}, client)
+        sent = client.call.call_args[0][0][1]["content"]
+        assert "Shallowest nodes first." in sent

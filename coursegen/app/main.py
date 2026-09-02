@@ -75,45 +75,6 @@ def _get_reranker():
 _BLUEPRINT_DIR = Path(__file__).resolve().parent.parent / "exam" / "blueprints"
 
 
-def _load_blueprint(blueprint_id: str):
-    """Load and validate a blueprint by ID from the bundled blueprints directory."""
-    from coursegen.contracts.blueprint import Blueprint
-    path = _BLUEPRINT_DIR / f"{blueprint_id}.json"
-    if not path.exists():
-        raise ValueError(f"Unknown blueprint: {blueprint_id!r}. Available: "
-                         + ", ".join(p.stem for p in _BLUEPRINT_DIR.glob("*.json")))
-    return Blueprint.model_validate(_json.loads(path.read_text("utf-8")))
-
-
-def _fetch_spans(
-    chunk_ids: list[str],
-) -> tuple[dict[str, str], dict[str, tuple[str, int]]]:
-    """
-    Fetch span text and source metadata from Qdrant for the given chunk IDs.
-    Returns (span_text_by_id, span_source_by_id).
-    Qdrant client is opened and closed within this call (S8 exclusive lock).
-    """
-    from coursegen.ingest.index import get_client
-    if not chunk_ids:
-        return {}, {}
-    client = get_client(config.DATA_DIR)
-    try:
-        records = client.retrieve(
-            collection_name=config.QDRANT_COLLECTION_NAME,
-            ids=chunk_ids,
-            with_payload=True,
-        )
-    finally:
-        client.close()
-    span_text = {str(r.id): (r.payload or {}).get("text", "") for r in records}
-    span_source = {
-        str(r.id): (
-            (r.payload or {}).get("source_file", "unknown"),
-            int((r.payload or {}).get("page", 0)),
-        )
-        for r in records
-    }
-    return span_text, span_source
 
 
 # ---------------------------------------------------------------------------
@@ -286,26 +247,15 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
 
 
 def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
-    """Orchestrate load → solve → generate → render for one exam (P1–P4 stages)."""
-    from coursegen.ingest.coursemap import load_course_map
-    from coursegen.exam.allocate import solve
-    from coursegen.exam.generate import generate_exam as _generate
-    from coursegen.exam.render import render_exam_artifacts
-    from coursegen.llm.client import LLMClient
+    """Adapt `pipeline.generate_paper` to the API contract.
 
-    nodes = load_course_map()
-    blueprint = _load_blueprint(blueprint_id)
-    specs, coverage = solve(nodes, blueprint)
-
-    chunk_ids = list({sid for spec in specs for sid in spec.span_ids})
-    span_text, span_source = _fetch_spans(chunk_ids)
-
-    out_dir = config.OUTPUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
+    The stage sequence lives in `coursegen/pipeline.py` and is shared with the
+    CLI. This function's only job is supplying the models and mapping the result
+    onto the shape `API-CONTRACT.md` freezes.
+    """
+    from coursegen.pipeline import generate_paper
 
     reranker = _get_reranker()
-    groundedness_scorer = lambda answer, src: float(reranker.predict([(answer, src)])[0])
-
     embed = _get_embed_model()
 
     def embedding_fn(texts: list[str]) -> list[list[float]]:
@@ -314,57 +264,24 @@ def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
         )
         return [v.tolist() for v in out["dense_vecs"]]
 
-    llm = LLMClient()
-    result = _generate(
-        specs=specs,
-        course_map=nodes,
-        span_text_by_id=span_text,
-        span_source_by_id=span_source,
-        llm_client=llm,
-        output_dir=out_dir,
-        cache_dir=out_dir / "cache",
-        blueprint_id=blueprint.blueprint_id,
-        groundedness_scorer=groundedness_scorer,
+    result = generate_paper(
+        blueprint_id=blueprint_id,
+        title=title,
+        groundedness_scorer=lambda answer, src: float(reranker.predict([(answer, src)])[0]),
         embedding_fn=embedding_fn,
     )
 
-    artifacts = render_exam_artifacts(
-        items=result.items,
-        coverage_report=coverage,
-        output_dir=out_dir,
-        title=title,
-    )
-
-    # Derived, never asserted. A run that rendered zero items produced a document
-    # with no questions in it, and calling that "ok" makes the field decorative.
-    status = "ok" if result.items else "empty"
-
-    # `coverage_ratio` is deliberately NOT returned (disconnected 2026-09-01).
-    #
-    # It measures matched nodes against the WHOLE corpus, which was the right
-    # question when every blueprint was derived from the whole corpus. Under an
-    # authored blueprint that asks for five named topics it answers a question
-    # nobody asked: on the first real paper - 20/20 items, 100/100 marks, every
-    # section filled - it read 0.04, because the paper legitimately covered 20 of
-    # 571 nodes. Arithmetically correct, and ruinous as a headline: a student
-    # would read "4% coverage" on a complete exam and distrust the tool.
-    #
-    # `fill_ratio` (slots filled / slots asked for) and `allocation_fidelity` are
-    # the honest headline numbers under an authored blueprint, and both are
-    # returned below.
-    #
-    # The field is NOT deleted from CoverageReport: P6 compares it against
-    # baseline_naive, and coverage.html still shows it in the audit view where the
-    # denominator is visible. Redefining it - coverage WITHIN the matched topic
-    # sets - is queued under "Finishing touches" in todo.md.
-
+    # `coverage_ratio` is deliberately NOT returned (disconnected 2026-09-01). It
+    # counts matched nodes against the WHOLE corpus, so under an authored
+    # blueprint it read 0.04 on a paper that was 20/20 items and 100/100 marks.
+    # `fill_ratio` and `allocation_fidelity` are the honest headline numbers.
     return {
-        "status": status,
-        "fill_ratio": coverage.fill_ratio,
-        "allocation_fidelity": coverage.allocation_fidelity,
-        "unfilled_slots": coverage.unfilled_slots,
+        "status": result.status,
+        "fill_ratio": result.coverage.fill_ratio,
+        "allocation_fidelity": result.coverage.allocation_fidelity,
+        "unfilled_slots": result.coverage.unfilled_slots,
         "items_count": len(result.items),
-        "warnings": coverage.warnings,
+        "warnings": result.coverage.warnings,
         "downloads": {
             "exam_html": "/api/files/exam.html",
             "answer_key_html": "/api/files/answer_key.html",
