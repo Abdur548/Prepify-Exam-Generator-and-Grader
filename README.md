@@ -1,84 +1,61 @@
 # Prepify
 
-**Start here: [STATE.md](STATE.md)** — where the project stands, what is broken,
-what the evaluation found, and what is left.
+Course Exam Generator and Chatbot. Upload your lecture material; get a structured
+exam paper with real citations back, and a chat window over the same corpus.
 
-Prepify generates university exam papers from a student's own course material. You upload
-your lecture slides and notes; Prepify builds a course map of the syllabus, and a
-deterministic **solver** allocates every question slot across that map before any language
-model is called. Code decides *what* to ask — which topic, which source span, which Bloom
-level, how many marks — and the LLM only phrases it. Because allocation happens in code,
-coverage is a provable precondition rather than a hope: the coverage report is computed and
-displayed before the paper is rendered.
+**Code decides *what* to ask** — which topic, which source span, which Bloom level —
+by `instructional_mass`. The model only writes the words. That claim is measured, not
+asserted: the solver covers **2.4–4.0× the instructional mass** of a random paper of
+identical shape, beating every individual draw on all four blueprints
+(`docs/P6-EVALUATION.md`).
 
-## Security requirement S8 — run the server single-worker
-
-`QdrantClient(path=...)` opens the local vector store in embedded mode and takes an
-**exclusive file lock**. A second worker process cannot acquire that lock and crashes on
-startup. Always run:
+## Layout
 
 ```
-uvicorn coursegen.app.main:app --workers 1
+prepify/
+├── backend/
+│   ├── coursegen/          the package
+│   │   ├── ingest/         parse → chunk → embed → index → course map
+│   │   ├── exam/           allocate → generate → validate → verify → render
+│   │   ├── retrieve/       hybrid search + reranking
+│   │   ├── chat/           question answering over the corpus
+│   │   ├── eval/           P6 allocation + E8 reliability harnesses
+│   │   ├── app/            FastAPI service and static UI
+│   │   ├── pipeline.py     the one orchestration, shared by API and CLI
+│   │   └── generate.py     CLI front end
+│   ├── tests/
+│   ├── data/               course material + Qdrant index (gitignored, S7)
+│   └── output/             generated papers (gitignored)
+├── docs/
+├── the working rules               working rules — read before changing anything
+└── STATE.md                where the project stands — read first
 ```
 
-Do not raise `--workers`, and do not let a process manager (systemd, a Procfile, a Docker
-`CMD`) fork additional workers. Without this, the failure surfaces as an apparently random
-startup crash — the kind that shows up for the first time on the demo machine.
+## Running it
 
-## Native prerequisite — WeasyPrint PDF output
-
-Prepify renders exam and answer-key PDFs through WeasyPrint. On Windows, `pip install
-weasyprint` is not enough: WeasyPrint also needs the GTK/Pango native runtime available to
-the process. Verify the demo machine before P7:
-
-```
-python - <<'PY'
-import weasyprint
-print('weasyprint import ok')
-PY
-```
-
-If this import fails with a missing `libgobject-2.0-0` / GTK / Pango library, install the
-WeasyPrint Windows native prerequisites before attempting PDF generation. The application
-pre-flight should fail at startup with this message rather than mid-generation.
-
-## Install
-
-```
+```bash
+cd backend
 pip install -e ".[dev]"
+cp .env.example .env          # add GEMINI_API_KEY
+
+python -m coursegen.generate --ingest "data/My Course"     # ~10 min, once
+python -m coursegen.generate --blueprint quiz_default --verify
+
+uvicorn coursegen.app.main:app --workers 1                 # single worker only (S8)
 ```
 
-Copy `.env.example` to `.env` and fill in the Gemini API key. The key is never required for
-the dry-run gate.
-
-## Gates
-
-```
-pytest -q                      # full test suite; makes zero network calls
-python -m coursegen --dry-run  # prints prompts and token estimates; zero network calls
+```bash
+python -m pytest                 # 477 tests, no network
+python -m pytest --live -m live  # real models + real API calls
+python -m coursegen.eval         # P6 allocation evaluation, no LLM calls
 ```
 
-Both must pass before a phase is considered complete.
+## What it does not do
 
-## Phase status
+**Prepify does not know whether a question is true.** The relevance gate rejects
+off-topic text; it cannot tell a true claim from a false one. Gate 5
+(`--verify`) checks whether an item's cited passage *states* its answer, which is a
+narrower and honest claim — not proof of correctness. See `docs/P6-EVALUATION.md` §E8.
 
-| Phase | Name | Status |
-|---|---|---|
-| P0 | Foundation — contracts, config, LLM client | complete |
-| P2′ | Allocation solver on a hand-written fixture | complete |
-| P1 | Ingest — parse, structure, chunk, embed, index, course map | **next** |
-| P2 | Solver on real ingested data | not started |
-| P3 | Generation + validation | not started |
-| P4 | Render + chat | not started |
-| P5 | UI + resilience | not started |
-| P6 | Evaluation + baseline | not started |
-| P7 | Hardening + rehearsal | not started |
-
-P1 is blocked on one open question — the `instructional_mass` formula is undefined in the
-spec. See `todo.md` under **Blocked**.
-
-## Living documents
-
-- `pipeline.md` — what the system is and how the stages connect
-- `progress.md` — what has shipped, with pasted gate output
-- `todo.md` — what is next, what is blocked, and what is deliberately deferred
+Some blueprints ask for **synthesis** items, deliberately not answerable from the
+uploaded material. The run manifest reports how many.
