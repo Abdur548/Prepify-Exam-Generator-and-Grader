@@ -1,6 +1,11 @@
 # Spec Amendment 01 — Authored, Subject-Specific Blueprints
 
-**Status:** PROPOSED — awaiting human decision. Nothing implemented.
+**Status:** ACCEPTED (option C) and **fully implemented**, 2026-08-30. Kept as the
+record of *why* option C was chosen over the alternatives in §4 — that reasoning is not
+recoverable from the code, which only shows what was built.
+Shipped: `ai_fundamentals_v1.json`, topic→node matching by matched IDF mass in
+`exam/allocate.py`, `grounding` and `generation_instructions` on `SectionSpec`,
+and marks-weighted `cognitive_balance`. Evidence in `docs/progress.md`.
 **Raised:** 2026-08-28, by the human, with `template_ai_fundamentals_v1` as the first instance.
 **Affects:** PRD §3, §8.2, §8.3, §9.3, §9.4, §9.5, C5, §16 · plan R6, R7 · phases P2′, P2, P3, P6.
 

@@ -1,6 +1,15 @@
 # P6 — Evaluation and Baseline
 
-**Status:** DRAFT specification, 2026-09-01. Nothing here is a PASS.
+**Status:** PART MEASURED, part specified. Last measured 2026-09-02.
+
+The allocation half is done and conclusive; E8 reliability, the factuality gate and
+prompt injection have all been measured since. What has NOT run is P5's browser gate
+and the remaining E-numbers still marked SPECIFIED below.
+
+The original header read *"nothing here is a PASS"*. That was true when written and
+became false without anyone noticing — the exact drift §2.4 exists to prevent, on the
+document that enforces it. Every section is still labelled MEASURED or SPECIFIED
+individually, and that labelling is what to trust; this header only says which mix.
 
 Every dimension below is either **MEASURED** (a real number, taken on the date shown, with
 the command that produced it) or **SPECIFIED** (defined, with a gate and a falsification
