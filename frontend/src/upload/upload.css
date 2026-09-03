@@ -1,0 +1,332 @@
+/* The upload screen — grotesque throughout; nothing here is the exam.
+ *
+ * --trace does not appear. A file that has been indexed is not yet provenance:
+ * provenance is a question pointing at a page, and no question exists yet.
+ * Filenames are mono, because they are evidence about the corpus.
+ */
+
+.up {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+}
+
+.up__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.up__sub {
+  margin: var(--s-2) 0 0;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.up__checking {
+  margin: var(--s-6) 0 0;
+  color: var(--graphite-light);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+}
+
+/* ---------- dropzone ---------- */
+
+.drop {
+  position: relative;
+  margin-top: var(--s-6);
+  padding: var(--s-8) var(--s-5);
+  text-align: center;
+  background: #fff;
+  border: 1.5px dashed var(--rule-strong);
+  border-radius: var(--radius-lg);
+}
+
+.drop--over {
+  border-color: var(--slate);
+  background: var(--paper-edge);
+}
+
+.drop__input {
+  display: none;
+}
+
+.drop__lead {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-lg);
+}
+
+.drop__btn {
+  margin-top: var(--s-4);
+  padding: var(--s-2) var(--s-5);
+  background: var(--slate);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.drop__btn:hover {
+  background: var(--slate-soft);
+}
+
+/* Limits inside the zone, not behind a tooltip read after the failure. */
+.drop__limits {
+  margin: var(--s-4) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+.up__warn {
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.up__rejected {
+  margin: var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4) var(--s-3) calc(var(--s-4) + 1.1em);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--t-xs);
+  line-height: 1.7;
+}
+
+.up__error {
+  margin: var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: #fff;
+  border-left: 3px solid var(--stop);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--t-sm);
+}
+
+/* ---------- the run ---------- */
+
+.run {
+  margin-top: var(--s-6);
+  padding: var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+}
+
+.run__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.run__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-lg);
+  font-weight: 700;
+}
+
+.run__clock {
+  font-family: var(--face-evidence);
+  font-size: var(--t-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Vertical, not the horizontal rail the generating screen uses. Three stages of
+   wildly unequal length would read as thirds of a journey laid side by side;
+   stacked, each carries its own note and none implies a share of the whole. */
+.run__stages {
+  list-style: none;
+  margin: var(--s-5) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-4);
+}
+
+.rstep {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: baseline;
+  color: var(--graphite-light);
+  font-size: var(--t-sm);
+}
+
+.rstep__dot {
+  width: 11px;
+  height: 11px;
+  margin-top: 0.35em;
+  border-radius: 50%;
+  background: var(--app-bg);
+  border: 2px solid var(--rule-strong);
+}
+
+.rstep--done,
+.rstep--active {
+  color: var(--ink);
+}
+
+.rstep--done .rstep__dot {
+  background: var(--slate);
+  border-color: var(--slate);
+}
+
+.rstep--active .rstep__dot {
+  background: #fff;
+  border-color: var(--slate);
+  animation: up-pulse 1.6s ease-in-out infinite;
+}
+
+.rstep--active .rstep__label {
+  font-weight: 600;
+}
+
+.rstep__note {
+  grid-column: 2;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+@keyframes up-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(35 41 54 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(35 41 54 / 0);
+  }
+}
+
+/* ---------- file list ---------- */
+
+.files {
+  list-style: none;
+  margin: var(--s-5) 0 0;
+  padding: var(--s-4) 0 0;
+  border-top: 1px solid var(--rule);
+  display: grid;
+  gap: var(--s-2);
+}
+
+.frow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  font-size: var(--t-xs);
+}
+
+.frow__name {
+  font-family: var(--face-evidence);
+  overflow-wrap: anywhere;
+}
+
+.frow__state {
+  flex: none;
+  color: var(--graphite-light);
+}
+
+.frow--read .frow__state {
+  color: var(--graphite);
+}
+
+/* The one status colour on this screen. A deck that could not be read is the
+   thing a student must not scroll past. */
+.frow--failed .frow__name,
+.frow--failed .frow__state {
+  color: var(--stop);
+}
+
+.frow--queued {
+  opacity: 0.55;
+}
+
+.run__safe {
+  margin: var(--s-5) 0 0;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+/* ---------- finished ---------- */
+
+.done {
+  margin-top: var(--s-5);
+  padding: var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+}
+
+.done--bad {
+  border-left: 3px solid var(--stop);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+
+.done__lead {
+  margin: 0;
+  font-size: var(--t-sm);
+}
+
+.done__hint {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.done__skipped {
+  margin: var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--t-xs);
+  line-height: 1.7;
+}
+
+.done__skipped p {
+  margin: 0;
+}
+
+.done__skipped ul {
+  margin: var(--s-2) 0 0;
+  padding-left: 1.1em;
+}
+
+.done__acts {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+}
+
+.done__btn {
+  padding: var(--s-2) var(--s-4);
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.done__btn--go {
+  background: var(--slate);
+  color: #fff;
+  border-color: var(--slate);
+  font-weight: 600;
+}
+
+.done__btn--go:hover {
+  background: var(--slate-soft);
+}

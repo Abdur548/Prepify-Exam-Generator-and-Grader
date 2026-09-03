@@ -6,12 +6,15 @@ Run with: uvicorn coursegen.app.main:app --workers 1
 """
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import logging
 import queue
+import shutil
 import tempfile
 import threading
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -52,6 +55,26 @@ _reranker_model = None
 # concurrent users, the fix is per-run output directories with run-scoped download
 # URLs - not a bigger lock.
 _PIPELINE_LOCK = threading.Lock()
+
+# What currently holds it, for the sake of anyone waiting. A queued generation can
+# now be blocked by an ingest as well as by another generation, and those are a
+# minute apart in expected duration - telling a student "another paper is being
+# generated" while a ten-minute index runs is a false statement about how long
+# they are about to wait. Written under the lock, read without it: it feeds one
+# sentence of copy, never a decision.
+_pipeline_holder: str = ""
+
+
+@contextmanager
+def _hold_pipeline(label: str):
+    global _pipeline_holder
+    _PIPELINE_LOCK.acquire()
+    _pipeline_holder = label
+    try:
+        yield
+    finally:
+        _pipeline_holder = ""
+        _PIPELINE_LOCK.release()
 
 
 def _get_embed_model():
@@ -151,19 +174,222 @@ def accept_disclosure() -> dict[str, bool]:
 # Ingest
 # ---------------------------------------------------------------------------
 
-@app.post("/api/ingest")
-async def ingest_files(files: list[UploadFile]) -> dict[str, Any]:
-    """Upload course material files and run the ingest pipeline."""
+def _safe_upload_name(raw: str | None) -> str:
+    """Reduce a client-supplied filename to a bare name inside our directory.
+
+    `Path(raw).name` strips every directory component, which is the same defence
+    `/api/files/{filename}` already applies on the way out. It was missing on the
+    way IN: `source_dir / "../../../Windows/Temp/pwned.pdf"` resolves outside the
+    temp directory, and the next line writes bytes to it — an unauthenticated
+    write-anywhere primitive from a multipart field. Verified 2026-09-04, fixed
+    the same day.
+
+    Backslashes are translated first because `PurePosixPath` semantics do not
+    treat them as separators, and a Windows client can legitimately send one.
+    """
+    name = Path((raw or "").replace("\\", "/")).name.strip()
+    # "..", "." and "" all reduce to nothing usable; a fixed fallback keeps the
+    # file inside the directory rather than rejecting the whole upload.
+    return name if name and name not in {".", ".."} else "upload"
+
+
+async def _save_uploads(files: list[UploadFile], dest_dir: Path) -> list[str]:
+    names: list[str] = []
+    for f in files:
+        name = _safe_upload_name(f.filename)
+        (dest_dir / name).write_bytes(await f.read())
+        names.append(name)
+    return names
+
+
+def _ingest_under_lock(
+    source_dir: Path,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> list[Any]:
+    """Ingest, serialised against generation.
+
+    Both touch Qdrant, which takes an exclusive file lock (S8): an ingest running
+    while a paper is generated makes the generation's span read fail. That was
+    unlikely while ingest was a request the caller sat and waited on. It stops
+    being unlikely the moment ingest becomes a background job the student can
+    walk away from and press Generate during.
+    """
     from coursegen.ingest.coursemap import ingest
 
+    with _hold_pipeline("indexing your uploads"):
+        return ingest(source_dir, on_event=on_event)
+
+
+@app.post("/api/ingest")
+async def ingest_files(files: list[UploadFile]) -> dict[str, Any]:
+    """Upload course material files and run the ingest pipeline.
+
+    Blocking: the caller waits out the whole run, which is minutes. Kept because
+    its shape is frozen in `API-CONTRACT.md` and the static UI calls it.
+    `/api/ingest/start` is the one a browser should use.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         source_dir = Path(tmpdir)
-        for f in files:
-            dest = source_dir / (f.filename or "upload")
-            dest.write_bytes(await f.read())
-        nodes = ingest(source_dir)
+        await _save_uploads(files, source_dir)
+        # `to_thread`, because `ingest` blocks for minutes and this coroutine runs
+        # ON the event loop. Before this, an ingest froze every other request for
+        # its whole duration - including /api/health, which is what a watchdog
+        # would be reading to decide the server had died.
+        nodes = await asyncio.to_thread(_ingest_under_lock, source_dir, None)
 
     return {"nodes_ingested": len(nodes)}
+
+
+# ---------------------------------------------------------------------------
+# Ingest as a job
+# ---------------------------------------------------------------------------
+#
+# A job with a status endpoint rather than a stream, which is the opposite of the
+# choice `/api/exam/stream` made, for one reason: **it has to survive a refresh.**
+#
+# Generation costs ~51 s and a student watches it. Ingest costs ~10 minutes and a
+# student does not — they switch tabs, close the laptop, come back. A streamed
+# response dies with the connection, so a reload at minute seven would leave them
+# with no way to find out whether their upload was still going, finished, or had
+# failed. State on the server can be re-read by whoever asks. That is the whole
+# argument, and it is why these two long waits are built differently.
+#
+# One job at a time. There is no job id because there cannot be two: ingest writes
+# one Qdrant collection and one course_map.json.
+
+_INGEST_STATE_LOCK = threading.Lock()
+
+_IDLE_INGEST: dict[str, Any] = {
+    "status": "idle",
+    "stage": None,
+    "files": [],
+    "topics": None,
+    "passages": None,
+    "nodes_ingested": None,
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+_ingest_state: dict[str, Any] = dict(_IDLE_INGEST)
+
+
+def _update_ingest(**fields: Any) -> None:
+    with _INGEST_STATE_LOCK:
+        _ingest_state.update(fields)
+
+
+def _apply_ingest_event(event: dict[str, Any]) -> None:
+    """Fold one pipeline event into the status record.
+
+    Per-file state is keyed by name and overwritten in place, so `reading` becomes
+    `read` or `failed` on the same row rather than appending a second one — the
+    client renders the list, not a log.
+    """
+    kind = event.get("event")
+    if kind == "stage":
+        if event.get("state") == "start":
+            _update_ingest(stage=event.get("stage"))
+        else:
+            patch = {k: event[k] for k in ("topics", "passages") if k in event}
+            if patch:
+                _update_ingest(**patch)
+        return
+    if kind == "file":
+        with _INGEST_STATE_LOCK:
+            rows: list[dict[str, Any]] = list(_ingest_state["files"])
+            row = {k: v for k, v in event.items() if k != "event"}
+            for i, existing in enumerate(rows):
+                if existing.get("file") == row.get("file"):
+                    rows[i] = {**existing, **row}
+                    break
+            else:
+                rows.append(row)
+            _ingest_state["files"] = rows
+
+
+def _ingest_job(source_dir: Path, names: list[str]) -> None:
+    """Run one ingest to a terminal status, then publish it.
+
+    The terminal status is written **after** the uploads are deleted, not before,
+    which makes the ordering something a caller can rely on: once `/api/ingest/status`
+    says `done` or `failed`, the student's files are already off this machine (S7).
+    Published the other way round it was merely probable, and a poller that acted
+    on `done` could observe them still sitting in the temp directory.
+    """
+    try:
+        _update_ingest(status="running")
+        nodes = _ingest_under_lock(source_dir, on_event=_apply_ingest_event)
+        outcome: dict[str, Any] = {
+            "status": "done",
+            "nodes_ingested": len(nodes),
+        }
+    except Exception:
+        # Same rule as generation: the traceback goes to the log, never to the
+        # client (R4). A failed ingest is a terminal status, not an exception the
+        # poller has to infer from a dropped connection.
+        logger.exception("Ingest job failed")
+        outcome = {
+            "status": "failed",
+            "error": "Indexing failed. Check the server logs.",
+        }
+    finally:
+        # `ignore_errors` so a locked handle cannot strand the job in `running`
+        # forever — a status nobody can clear is worse than a file left behind.
+        shutil.rmtree(source_dir, ignore_errors=True)
+
+    _update_ingest(stage=None, finished_at=time.time(), **outcome)
+
+
+@app.post("/api/ingest/start")
+async def ingest_start(files: list[UploadFile]) -> dict[str, Any]:
+    """Begin an ingest and return immediately. Poll `/api/ingest/status`."""
+    with _INGEST_STATE_LOCK:
+        if _ingest_state["status"] in ("queued", "running"):
+            raise HTTPException(
+                status_code=409,
+                detail="An upload is already being indexed. Wait for it to finish.",
+            )
+        _ingest_state.clear()
+        _ingest_state.update(_IDLE_INGEST)
+        _ingest_state.update(
+            status="queued", files=[], started_at=time.time(), finished_at=None
+        )
+
+    # Not a TemporaryDirectory context: the directory has to outlive this request
+    # by the length of the job. `_ingest_job` owns it and removes it in a finally.
+    source_dir = Path(tempfile.mkdtemp(prefix="prepify-ingest-"))
+    try:
+        saved = await _save_uploads(files, source_dir)
+    except Exception:
+        shutil.rmtree(source_dir, ignore_errors=True)
+        _update_ingest(status="idle")
+        raise
+
+    _update_ingest(files=[{"file": n, "state": "queued"} for n in saved])
+    threading.Thread(
+        target=_ingest_job, args=(source_dir, saved), name="ingest", daemon=True
+    ).start()
+    return {"started": True, "files": saved}
+
+
+@app.get("/api/ingest/status")
+def ingest_status() -> dict[str, Any]:
+    """Where the current or most recent ingest got to.
+
+    Safe to poll, and safe to call from a page that has just loaded knowing
+    nothing — which is the point. `elapsed_seconds` is derived here rather than in
+    the client so a reloaded tab shows the true age of the run, not the age of its
+    own connection.
+    """
+    with _INGEST_STATE_LOCK:
+        state = dict(_ingest_state)
+        state["files"] = [dict(f) for f in state["files"]]
+
+    started, finished = state["started_at"], state["finished_at"]
+    state["elapsed_seconds"] = (
+        round((finished or time.time()) - started, 1) if started else None
+    )
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +487,7 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
     _require_disclosure()
     # Serialised: see _PIPELINE_LOCK. Held across the whole run because the
     # artifacts only agree with the manifest once render has finished.
-    with _PIPELINE_LOCK:
+    with _hold_pipeline("generating a paper"):
         result = _exam_outcome(request.blueprint_id, request.title)
     if result.get("status") == "failed":
         raise HTTPException(status_code=500, detail=result["detail"])
@@ -439,14 +665,22 @@ def generate_exam_streamed(request: ExamRequest) -> StreamingResponse:
             # generation is TOLD it is queueing. The lock is otherwise a silent
             # wait - API-CONTRACT.md warns that double-clicking Generate produces
             # "a long silent wait" - and silence is what a stream exists to fix.
+            global _pipeline_holder
             waited = not _PIPELINE_LOCK.acquire(blocking=False)
             if waited:
-                events.put({"event": "stage", "stage": "waiting", "state": "start"})
+                events.put({
+                    "event": "stage", "stage": "waiting", "state": "start",
+                    # Read before we hold the lock, so it names the run we are
+                    # actually queued behind.
+                    "holder": _pipeline_holder or "another job",
+                })
                 _PIPELINE_LOCK.acquire()
                 events.put({"event": "stage", "stage": "waiting", "state": "done"})
+            _pipeline_holder = "generating a paper"
             try:
                 body = _exam_outcome(blueprint_id, title, on_event=events.put)
             finally:
+                _pipeline_holder = ""
                 _PIPELINE_LOCK.release()
             if body.get("status") == "failed":
                 events.put({"event": "error", "detail": body["detail"]})

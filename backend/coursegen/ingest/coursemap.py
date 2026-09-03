@@ -13,7 +13,7 @@ import logging
 import math
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import yake  # type: ignore[import]
 
@@ -31,23 +31,57 @@ logger = logging.getLogger(__name__)
 def ingest(
     source_dir: Path,
     data_dir: Optional[Path] = None,
+    on_event: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> list[CourseMapNode]:
     """
     Run the full ingest pipeline on all PDF/PPTX/DOCX files in *source_dir*.
 
     Idempotent (C1): re-running on unchanged input produces identical node IDs,
     identical course_map.json, and identical Qdrant point count.
+
+    ## Three stages, wildly unequal
+
+    `on_event` reports `reading` -> `mapping` -> `indexing`, plus per-file events
+    forwarded from `parse_directory`. The split is by *cost*, not by the nine
+    internal stages, because a progress display that gives equal weight to unequal
+    work misleads more than no display at all: on 14 real decks the first two take
+    seconds and `indexing` takes the better part of ten minutes.
+
+    **`indexing` reports no sub-progress, and that is a limitation, not an
+    oversight.** It is one `model.encode(texts, batch_size=...)` call and
+    FlagEmbedding batches inside it with no callback to hook. Slicing the call
+    here would produce a progress number at the cost of changing the embedding
+    path, and R10 wants byte-identical vectors proven before that ships.
     """
     data_dir = data_dir or config.DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    fire = on_event or (lambda _e: None)
+
+    def event(kind: str, **fields: Any) -> None:
+        # Swallowed for the reason every other telemetry point here is: ingest
+        # costs ten minutes of the student's time and must not be lost narrating
+        # itself.
+        try:
+            fire({"event": kind, **fields})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def stage(name: str, state: str, **fields: Any) -> None:
+        event("stage", stage=name, state=state, **fields)
+
     # --- Stage 1: parse ---
-    parsed_docs = parse_directory(source_dir)
+    stage("reading", "start")
+    parsed_docs = parse_directory(
+        source_dir, on_file=lambda f: event("file", **f)
+    )
+    stage("reading", "done", files_read=len(parsed_docs))
     if not parsed_docs:
         logger.warning("No documents parsed from %s — nothing to ingest.", source_dir)
         return []
 
     # --- Stage 2 + 3: structure → chunk ---
+    stage("mapping", "start")
     all_sections: list[LeafSection] = []
     for doc in parsed_docs:
         sections = extract_sections(doc)
@@ -108,14 +142,20 @@ def ingest(
 
     # --- Stage 8: persist course_map.json ---
     save_course_map(nodes, data_dir / "course_map.json")
+    stage("mapping", "done", topics=len(nodes), passages=len(all_chunks))
 
     # --- Stage 9: embed + index ---
+    # `passages` is sent on start, not just on done: it is the only number the
+    # client has to size the wait by, and it is useless once the wait is over.
+    stage("indexing", "start", passages=len(all_chunks))
     model = load_model()
     embed_result = embed_chunks(all_chunks, model)
     client = get_client(data_dir)
     get_or_create_collection(client)
     upsert_chunks(client, all_chunks, embed_result)
     client.close()
+
+    stage("indexing", "done", passages=len(all_chunks))
 
     logger.info("Ingest complete: %d nodes, %d chunks.", len(nodes), len(all_chunks))
     return nodes

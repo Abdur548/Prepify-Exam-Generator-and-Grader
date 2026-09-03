@@ -179,6 +179,17 @@ backend has been asking for since the synthesis ratio first fired at 40%.
 **1 · Upload** — dropzone, formats and limits inline (Scholarly's pattern), file list with
 per-file parse state. Ingest takes ~10 minutes, so this screen owns the long wait (§6).
 
+Built 2026-09-04 on `POST /api/ingest/start` + `GET /api/ingest/status`. **Polled, not
+streamed** — the opposite of the generating screen, and deliberately: a student watches a
+51-second generation and does not watch a ten-minute index. Server-held state is the only
+kind a reloaded tab can read, so the screen says *"this keeps running if you close the
+tab"* and means it.
+
+Three stages, split by cost rather than by the pipeline's nine internal ones:
+`Reading your files → Finding the topics → Indexing your material`. The third is nearly
+all of the time and has **no sub-progress** — it is one `model.encode(...)` call with no
+callback — so it shows a passage count and an estimate scaled from that count, never a bar.
+
 **2 · Blueprint** — TestMacher's Auto Generator, ours. Title, exam type, total marks,
 duration; then section rows (`Section A · 10 × MCQ · 2 marks`), then the live counters
 `20 QUESTIONS · 100 MARKS · 5 SECTIONS · 180 MIN`. Preview pane shows the empty paper
@@ -223,7 +234,7 @@ These are measured, not guesses (`docs/FRONTEND-BRIEF.md`).
 | reality | design consequence |
 |---|---|
 | first request ~51 s (~24 s of it the model load) | the generating screen must show *stages*, never a bare spinner. Built: `/api/exam/stream` |
-| ingest ~10 min, no progress stream | upload screen owns a long wait: per-file states, honest "this takes about ten minutes", and it must survive a refresh |
+| ingest ~10 min, no progress stream | upload screen owns a long wait: per-file states, an estimate scaled from the passage count, and it must survive a refresh. Built: `/api/ingest/start` + `/api/ingest/status` |
 | one generation at a time (process lock) | disable Generate on submit; a second attempt blocks silently, so the UI must never imply a queue |
 | four outcomes: `ok` / `empty` / `degraded` / 500 | four distinct states. `degraded` is a **partial paper you can still use**, not an error — show what came back plus what did not |
 | `fill_ratio` < 1 | show which slots are unfilled, in place, in the marks rail |
@@ -249,7 +260,7 @@ complete and usable — the missing six are marked."*
 3. Blueprint form with live counters, two-pane against the paper.
 4. ~~Generating screen with real stages.~~ **Done** 2026-09-03 — needed a streaming endpoint first.
 5. Provenance drag (landing + in-app, one component).
-6. Upload with the long wait.
+6. ~~Upload with the long wait.~~ **Done** 2026-09-04 — needed ingest to become a job first.
 7. Chat with `from_material`.
 8. *Phase 2:* sit-the-exam mode.
 

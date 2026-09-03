@@ -2649,3 +2649,114 @@ $ python -m pytest -q
 - `frontend/src/generate/` — the screen, the NDJSON reader, the event types.
 - `tests/test_p7_stream.py` — 21 tests across transport, parity, failure, contention,
   batch progress, the real pipeline, and real HTTP.
+
+---
+
+## 2026-09-04 — Ingest as a job, and the upload screen
+
+**Status: PASS on its own declared gate.** The gate: a ten-minute wait a student can walk
+away from and come back to, with per-file state, and nothing on screen that the server did
+not report. Measured against a live server on a throwaway corpus, not asserted.
+
+### A security defect found on the way in
+
+`/api/ingest` wrote uploads as `source_dir / f.filename`, unsanitised.
+
+```
+$ python -c "from pathlib import Path; print((Path('C:/tmp/x') / '../../../Windows/Temp/pwned.pdf').resolve())"
+C:\Windows\Temp\pwned.pdf
+```
+
+An unauthenticated multipart field is therefore a write-anywhere primitive. `/api/files/{filename}`
+had been hardened with `Path(name).name` on the way **out**; the way **in** had never been.
+Fixed on both routes, with an end-to-end test that posts `../../../pwned.pdf` and asserts
+the byte lands inside the temp directory.
+
+### Why polled and not streamed
+
+The opposite choice to `/api/exam/stream`, made three days earlier, for one reason: **it
+has to survive a refresh.** A student watches a 51-second generation. Nobody watches a
+ten-minute index — they switch tabs, shut the laptop, come back. A streamed response dies
+with the connection; server-held state can be re-read by whoever asks next.
+
+### Gate 1 — a real ingest, end to end, in the browser
+
+Run against a **sandboxed data directory**, because `ingest()` calls
+`save_course_map(nodes, data_dir / "course_map.json")` and would otherwise have replaced a
+571-node corpus that cost ten minutes of CPU to build.
+
+```
+t=0.5s   active [Reading your files]      0 of 1 files    ai_search_notes.pdf  reading…
+t=2.5s   active [Indexing your material]  1 of 1 files · 2 topics · 2 passages
+                                          ai_search_notes.pdf  5 blocks
+t=29.5s  "Indexed 2 topics from 1 file in 0:28."
+```
+
+Real corpus verified untouched after the run (`course_map.json` still 490,165 bytes,
+2026-09-02).
+
+### Gate 2 — seven mutations, all caught
+
+```
+CAUGHT  coursegen/app/main.py: name = Path((raw or "").replace("\\", "/")).name.strip()
+CAUGHT  coursegen/app/main.py: if _ingest_state["status"] in ("queued", "running"):
+CAUGHT  coursegen/app/main.py: with _hold_pipeline("indexing your uploads"):
+CAUGHT  coursegen/app/main.py: shutil.rmtree(source_dir, ignore_errors=True)
+CAUGHT  coursegen/app/main.py: "holder": _pipeline_holder or "another job",
+CAUGHT  coursegen/app/main.py: rows[i] = {**existing, **row}
+CAUGHT  coursegen/ingest/parse.py: _say(on_file, path.name, "failed", ...)
+```
+
+The last read **NOT CAUGHT** first time. Turning a file's `failed` report into `read` left
+the whole suite green — a deck that could not be opened would have shown on the student's
+screen as successfully read, then silently never appeared in a paper. Every test of the
+event folding stubbed `ingest`, so nothing exercised the parser. `TestParseReportsEachFile`
+runs the real one over the real `native_pdf` / `malformed_pdf` fixtures. Same shape as the
+`writing` mutation on 2026-09-03: a mocked-out subject proves nothing about the subject.
+
+### Three defects found only by running it
+
+1. **The ten-minute estimate did not scale.** The indexing note read
+   `2 passages · usually about ten minutes` on a run that took 28 seconds. The figure was
+   measured on a full course and printed regardless of size. Now derived from the passage
+   count — `30 + passages` seconds fits both measured points (2 → 28 s, 572 → ~10 min) —
+   and bucketed coarsely, because two points is not a model.
+2. **Polling stopped at a terminal status.** A run begun anywhere else went unnoticed, and
+   the screen kept offering a dropzone whose upload could only answer 409. Now idles at
+   10 s instead of stopping.
+3. **`dismissed` was a bare boolean.** Dismissing one result masked *every* later one, so
+   a second run's outcome — including a failure — never appeared. Now scoped to the
+   `started_at` it was set for.
+
+### A guarantee worth naming
+
+The job deletes the upload directory **before** publishing `done` or `failed`. So a
+terminal status means the student's files are already off the machine (S7), rather than
+probably about to be. Found by a racy test; the fix made the ordering assertable.
+
+### Deliberately NOT claimed
+
+- **`indexing` has no sub-progress and this does not add any.** It is one
+  `model.encode(texts, batch_size=…)` call, batched inside FlagEmbedding with no callback.
+  Slicing it would buy a progress number at the cost of changing the embedding path, and
+  R10 wants byte-identical vectors proven first — a ~10-minute measurement nobody has run.
+- **Never ingested at real scale through this path.** The largest run here was 1 file /
+  2 passages. The ~10-minute figure is still the one from `API-CONTRACT.md`, measured on
+  the old blocking route.
+- **The three frontend defects above have no automated test**, because there is no
+  frontend test runner in this repo and standing one up was not part of this work.
+
+```
+$ python -m pytest -q
+551 passed, 9 skipped        (was 521 / 9)
+```
+
+### Files
+
+- `coursegen/app/main.py` — `/api/ingest/start`, `/api/ingest/status`, `_safe_upload_name`,
+  `_hold_pipeline`, and `/api/ingest` moved off the event loop with `asyncio.to_thread`.
+- `coursegen/ingest/coursemap.py` — `on_event`, three stages split by cost.
+- `coursegen/ingest/parse.py` — `on_file`, per-file `reading` → `read` / `failed`.
+- `frontend/src/upload/` — the screen, the polling hook, the status types.
+- `tests/test_p7_ingest_job.py` — 30 tests: traversal, job lifecycle, contention, cleanup,
+  and the real parser.

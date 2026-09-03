@@ -32,7 +32,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Callable, Literal, Optional
 
 from coursegen import config
 
@@ -104,10 +104,18 @@ def parse_file(path: Path) -> ParsedDocument:
     raise ValueError(f"Unsupported file type: {suffix!r} ({path.name})")
 
 
-def parse_directory(source_dir: Path) -> list[ParsedDocument]:
+def parse_directory(
+    source_dir: Path,
+    on_file: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> list[ParsedDocument]:
     """
     Parse all PDF/PPTX/DOCX files in source_dir.
     One bad file logs an error and is skipped; the batch always completes (R3).
+
+    `on_file` reports each file as `reading` -> `read` or `failed`. It exists
+    because this is the only stage of ingest that can say anything about an
+    individual file the student handed us: everything after it works on sections
+    and chunks, which do not map back to a filename the student would recognise.
 
     Each file is parsed under a config.PARSE_TIMEOUT_SECONDS watchdog (S3), so one
     pathological document cannot hang the whole ingest. A file that overruns is
@@ -131,7 +139,8 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
         logger.warning("No supported files found in %s", source_dir)
 
     docs: list[ParsedDocument] = []
-    for path in candidates:
+    for index, path in enumerate(candidates):
+        _say(on_file, path.name, "reading", index=index, total=len(candidates))
         try:
             doc = _parse_file_with_timeout(path)
             docs.append(doc)
@@ -141,10 +150,33 @@ def parse_directory(source_dir: Path) -> list[ParsedDocument]:
                 "Parsed %s [%s]: %d blocks, page_count=%d",
                 path.name, doc.source_type, len(doc.blocks), doc.page_count,
             )
+            _say(on_file, path.name, "read", index=index, total=len(candidates),
+                 blocks=len(doc.blocks), source_type=doc.source_type)
         except Exception as exc:
             logger.error("Failed to parse %s — skipping: %s", path.name, exc)
+            # The reason reaches the student, so it is the exception's message and
+            # not its type: "file is encrypted" is actionable, "ValueError" is not.
+            # R4 still applies - this is a parse failure on a file they handed us,
+            # not the inside of the process.
+            _say(on_file, path.name, "failed", index=index, total=len(candidates),
+                 reason=str(exc) or type(exc).__name__)
 
     return docs
+
+
+def _say(on_file, name: str, state: str, **fields: Any) -> None:
+    """Report one file's progress, and never let the report break the batch.
+
+    `parse_directory`'s whole contract is that one bad file cannot stop the
+    others (R3). A telemetry callback that raises would undo exactly that, so it
+    is swallowed on the same reasoning as `pipeline.say`.
+    """
+    if on_file is None:
+        return
+    try:
+        on_file({"file": name, "state": state, **fields})
+    except Exception:  # noqa: BLE001 - a progress line is never worth a failure
+        pass
 
 
 def _parse_file_with_timeout(path: Path) -> ParsedDocument:

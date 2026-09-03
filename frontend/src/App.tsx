@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BlueprintScreen } from "./plan/BlueprintScreen";
+import { UploadScreen } from "./upload/UploadScreen";
 import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
 import type { Plan } from "./plan/types";
@@ -9,10 +10,10 @@ import "./styles/tokens.css";
 import "./harness.css";
 
 /**
- * Dev harness. Three screens: the blueprint (with its free dry run), the wait,
- * and the paper. All run against the real API rather than fixtures.
+ * Dev harness. Four screens: upload, the blueprint (with its free dry run), the
+ * wait, and the paper. All run against the real API rather than fixtures.
  */
-type Screen = "blueprint" | "generating" | "paper";
+type Screen = "upload" | "blueprint" | "generating" | "paper";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("blueprint");
@@ -47,6 +48,13 @@ export default function App() {
       <header className="harness__bar">
         <nav className="harness__nav">
           <button
+            className={screen === "upload" ? "on" : ""}
+            disabled={busy}
+            onClick={() => setScreen("upload")}
+          >
+            Upload
+          </button>
+          <button
             className={screen === "blueprint" ? "on" : ""}
             disabled={busy}
             onClick={() => setScreen("blueprint")}
@@ -74,6 +82,10 @@ export default function App() {
       </header>
 
       <main>
+        {screen === "upload" && (
+          <UploadScreen onDone={() => setScreen("blueprint")} />
+        )}
+
         {screen === "blueprint" && (
           <BlueprintScreen
             onGenerate={(blueprintId, plan) => {

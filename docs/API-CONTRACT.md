@@ -81,9 +81,66 @@ not by treating it as a bug.
 {"nodes_ingested": 571}
 ```
 **Slow: minutes, not seconds.** ~10 minutes for 14 decks / 572 chunks on CPU. Uploads land
-in a temp directory that is deleted after the call. There is currently **no progress
-stream** — the request simply does not return for a long time. Plan the UI around that, or
-add streaming to the backend first.
+in a temp directory that is deleted after the call, and the request does not return until
+the whole run is over. **A browser should use `/api/ingest/start` instead**; this one is
+kept because its shape is frozen and the static UI calls it.
+
+Filenames are reduced to a bare name (`Path(name).name`). Before 2026-09-04 they were not,
+and a `files` field named `../../../x.pdf` wrote outside the temp directory.
+
+### `POST /api/ingest/start` → 200 / 409
+
+Added 2026-09-04. Same multipart body. Starts the ingest and **returns immediately**:
+
+```json
+{"started": true, "files": ["03_search.pdf", "06_CSP.pdf"]}
+```
+
+**409** if one is already being indexed. There is no job id because there cannot be two
+jobs: ingest writes one Qdrant collection and one `course_map.json`.
+
+The job takes `_PIPELINE_LOCK`, so a generation started during an ingest waits rather than
+failing on Qdrant's exclusive file lock. `/api/exam/stream` reports that wait with
+`holder: "indexing your uploads"`.
+
+### `GET /api/ingest/status` → 200
+
+```json
+{
+  "status": "running",
+  "stage": "indexing",
+  "files": [
+    {"file": "03_search.pdf", "state": "read", "blocks": 142, "source_type": "pdf"},
+    {"file": "old.ppt", "state": "failed", "reason": "legacy .ppt is not supported…"}
+  ],
+  "topics": 187,
+  "passages": 572,
+  "nodes_ingested": null,
+  "started_at": 1788463907.4,
+  "finished_at": null,
+  "error": null,
+  "elapsed_seconds": 22.8
+}
+```
+
+`status` is `idle` / `queued` / `running` / `done` / `failed`. `stage` is `reading` →
+`mapping` → `indexing`, and `null` outside a run.
+
+**Poll this rather than holding a stream.** Generation is streamed because a student
+watches ~51 s; ingest is a job because nobody watches ~10 minutes — they switch tabs, close
+the laptop, come back. Server-held state is the only kind a reloaded page can read, so a
+run started in one tab is visible in the next. Keep polling when idle too: a run may have
+been started somewhere else.
+
+**`indexing` reports no sub-progress, and cannot yet.** It is one
+`model.encode(texts, batch_size=…)` call and FlagEmbedding batches inside it with no
+callback. Slicing that call would buy a progress number at the cost of changing the
+embedding path — R10 wants byte-identical vectors proven first. Size the wait from
+`passages`: `30 + passages` seconds fits both measured points (2 → 28 s, 572 → ~10 min).
+
+**A terminal status means the uploads are already deleted.** The job removes the temp
+directory before publishing `done` or `failed`, so a client acting on that status is acting
+on a fact rather than a probability (S7).
 
 ### `POST /api/exam` → 200 / 403 / 500
 ```json
