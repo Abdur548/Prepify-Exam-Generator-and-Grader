@@ -1,0 +1,346 @@
+/* The blueprint screen — app chrome, so the grotesque world.
+ *
+ * --trace appears in exactly one place here: the source files feeding a section.
+ * That is provenance, which is what the colour means. It is not on the Generate
+ * button, not on the presets, not on the meter.
+ */
+
+.bp {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+}
+
+.bp__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.bp__sub {
+  margin: var(--s-2) 0 0;
+  max-width: 34rem;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.bp__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  gap: var(--s-6);
+  margin-top: var(--s-6);
+  align-items: start;
+}
+
+/* ---------- form ---------- */
+
+.field {
+  border: 0;
+  margin: 0 0 var(--s-6);
+  padding: 0;
+}
+
+.field__legend {
+  padding: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* The microcopy explains why the field exists, not what it is called. */
+.field__why {
+  display: block;
+  margin-top: 2px;
+  font-weight: 400;
+  color: var(--graphite);
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+.preset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+
+.preset:hover {
+  border-color: var(--rule-strong);
+}
+
+.preset--on {
+  border-color: var(--slate);
+  box-shadow: inset 0 0 0 1px var(--slate);
+}
+
+.preset__label {
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+
+.preset__hint {
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+/* ---------- section rows ---------- */
+
+.sections {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.srow {
+  padding: var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.srow__main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+
+.srow__id {
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+.srow__title {
+  font-family: var(--face-paper);
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.srow__desc {
+  margin: var(--s-2) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+/* Provenance — the one place --trace belongs on this screen. */
+.srow__src {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--trace-deep);
+  overflow-wrap: anywhere;
+}
+
+.srow__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--trace);
+  flex: none;
+}
+
+/* No trace colour. A synthesis section is not a fault, so it gets no warning
+   styling either — plain text, stated plainly. */
+.srow__synth {
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+.srow__short {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 3px 3px 0;
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+
+/* ---------- dry run panel ---------- */
+
+.bp__panel {
+  position: sticky;
+  top: var(--s-5);
+}
+
+.panel {
+  padding: var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+}
+
+.panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.panel__title {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.panel__state {
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+.panel__state--ready {
+  color: var(--graphite);
+}
+
+.panel__error {
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.panel__errorhint {
+  display: block;
+  margin-top: var(--s-2);
+  color: var(--graphite);
+  font-size: var(--t-xs);
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  text-align: center;
+}
+
+.figure__value {
+  display: block;
+  font-family: var(--face-paper);
+  font-size: var(--t-lg);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.figure__label {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.6875rem;
+  color: var(--graphite);
+}
+
+.meter {
+  margin-top: var(--s-4);
+}
+
+.meter__track {
+  height: 5px;
+  background: var(--rule);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* Slate, not trace: this is completeness, not provenance. */
+.meter__fill {
+  height: 100%;
+  background: var(--slate);
+  transition: width 180ms ease;
+}
+
+.meter__note {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.facts {
+  margin: var(--s-4) 0 0;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+  display: grid;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+}
+
+.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.facts dt {
+  color: var(--graphite);
+}
+
+.facts dd {
+  margin: 0;
+  font-family: var(--face-evidence);
+}
+
+.panel__warnings {
+  margin: var(--s-4) 0 0;
+  padding: 0 0 0 1.1em;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+  line-height: 1.6;
+}
+
+.generate {
+  width: 100%;
+  margin-top: var(--s-5);
+  padding: var(--s-3) var(--s-4);
+  background: var(--slate);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.generate:hover {
+  background: var(--slate-soft);
+}
+
+.generate__cost {
+  margin: var(--s-2) 0 0;
+  text-align: center;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+@media (max-width: 56rem) {
+  .bp__cols {
+    grid-template-columns: 1fr;
+  }
+
+  .bp__panel {
+    position: static;
+    order: -1; /* the dry run is the point; on narrow screens it leads */
+  }
+}

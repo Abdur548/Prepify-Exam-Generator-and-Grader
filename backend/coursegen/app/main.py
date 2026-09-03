@@ -169,6 +169,42 @@ async def ingest_files(files: list[UploadFile]) -> dict[str, Any]:
 # File serving
 # ---------------------------------------------------------------------------
 
+class PlanRequest(BaseModel):
+    blueprint_id: str
+
+
+@app.post("/api/plan")
+def plan_paper(request: PlanRequest) -> dict[str, Any]:
+    """The dry run: what this paper would be, costing nothing.
+
+    Deliberately NOT behind the disclosure gate that /api/exam sits behind. The
+    disclosure is about sending the student's material to a model; a plan sends
+    nothing anywhere. Gating a free, local, read-only preview behind a consent
+    step the student has not yet had a reason to give would be theatre.
+
+    Runs the solver only - no LLM calls, no quota, 5-125 ms - so the UI can offer
+    it on every keystroke if it wants to.
+    """
+    from coursegen.exam.allocate import solve
+    from coursegen.exam.plan import build_plan
+    from coursegen.ingest.coursemap import load_course_map
+    from coursegen.pipeline import load_blueprint
+
+    if not config.COURSE_MAP_PATH.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="No course material has been ingested yet. Upload your notes first.",
+        )
+    try:
+        blueprint = load_blueprint(request.blueprint_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    nodes = load_course_map(config.COURSE_MAP_PATH)
+    specs, coverage = solve(nodes, blueprint)
+    return build_plan(specs, coverage, blueprint, nodes)
+
+
 @app.get("/api/paper")
 def get_paper() -> dict[str, Any]:
     """The most recently generated paper, as structured data.

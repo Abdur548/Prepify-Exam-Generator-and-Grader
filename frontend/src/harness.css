@@ -9,3 +9,9 @@
 .harness__stats b { color: #fff; font-weight: 500; }
 .harness__filter { display: flex; align-items: center; gap: var(--s-2); cursor: pointer; }
 .harness__main { padding: var(--s-6) var(--s-4) var(--s-8); }
+.harness__nav { display: flex; gap: var(--s-1); }
+.harness__nav button {
+  background: none; border: 0; color: #9aa3b4; cursor: pointer;
+  font: inherit; font-size: var(--t-xs); padding: 4px 10px; border-radius: 4px;
+}
+.harness__nav button.on { background: rgb(255 255 255 / 0.12); color: #fff; }
