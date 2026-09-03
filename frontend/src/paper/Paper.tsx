@@ -23,6 +23,23 @@ export function Paper({ paper, fromMaterialOnly = false }: Props) {
   const { summary } = paper;
   const short = summary.marks_available < paper.total_marks;
 
+  // Counted off the paper, NOT off `summary.unfilled_slots`.
+  //
+  // Those are two different reasons a slot is empty. `unfilled_slots` is the
+  // solver's: it could not place a question there at all. `filled: false` also
+  // covers the slot that WAS placed, was written, and then lost its item at a
+  // validation gate — allocation succeeded, so the slot never appears in
+  // `unfilled_slots` and `fill_ratio` still reads 1.0.
+  //
+  // Conflating them printed "0 questions could not be built from your material"
+  // directly above a gap it had just drawn, on a real run where one MCQ was
+  // rejected twice for an option-length outlier. Seen 2026-09-03; no fixture had
+  // ever produced a paper whose slots were allocated but not delivered.
+  const gaps = paper.sections.reduce(
+    (n, s) => n + s.items.filter((i) => !i.filled).length,
+    0,
+  );
+
   return (
     <article className="paper" aria-label={paper.title}>
       <PaperHead paper={paper} />
@@ -30,9 +47,9 @@ export function Paper({ paper, fromMaterialOnly = false }: Props) {
       {short && (
         <p className="paper__shortfall" role="status">
           This paper carries <strong>{summary.marks_available}</strong> of{" "}
-          {paper.total_marks} marks. {summary.unfilled_slots.length} question
-          {summary.unfilled_slots.length === 1 ? "" : "s"} could not be built from
-          your material — they are marked below.
+          {paper.total_marks} marks. {gaps} question{gaps === 1 ? "" : "s"} could
+          not be built from your material — {gaps === 1 ? "it is" : "they are"}{" "}
+          marked below.
         </p>
       )}
 

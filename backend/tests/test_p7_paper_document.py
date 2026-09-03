@@ -125,6 +125,38 @@ class TestUnfilledSlots:
         assert items[1]["filled"] is False
         assert items[1]["marks"] == 5      # the gap still knows what it was worth
 
+    def test_a_slot_lost_at_a_gate_is_a_gap_even_though_allocation_succeeded(self) -> None:
+        """The case every fixture had missed, and a real run produced.
+
+        There are two different reasons a slot ends up empty and they are recorded
+        in different places. `coverage.unfilled_slots` is the solver's: it could
+        not place a question there. But a slot that WAS placed, WAS written and
+        then lost its item at a validation gate never appears there — allocation
+        succeeded, so `unfilled_slots` stays empty and `fill_ratio` stays 1.0.
+
+        On 2026-09-03 a live quiz_default run hit exactly this: an MCQ was rejected
+        twice for an option-length outlier, and the paper came back 6 items over 7
+        allocated slots with `unfilled_slots: []`. A client counting that array
+        printed "0 questions could not be built" directly above the gap it had just
+        drawn. `filled` is the field that answers "is there a question here"; the
+        coverage report answers a different question.
+        """
+        paper = build_paper(
+            items=[_item("A-01")], specs=[_spec("A-01"), _spec("A-02")],
+            blueprint=_blueprint(),
+            # Allocation was perfect. The item is missing anyway.
+            coverage=_coverage(slots_total=2, filled=2, unfilled=[]), title="T",
+        )
+        assert paper["summary"]["unfilled_slots"] == []
+        assert paper["summary"]["fill_ratio"] == 1.0
+
+        items = paper["sections"][0]["items"]
+        assert [i["filled"] for i in items] == [True, False]
+        # The two counts disagree, and that is the point: a renderer must take the
+        # gap count from the items, never from the coverage report.
+        assert sum(1 for i in items if not i["filled"]) == 1
+        assert paper["summary"]["marks_available"] < paper["total_marks"]
+
     def test_marks_available_counts_only_filled_slots(self) -> None:
         """What the paper is actually worth, not what it was asked to be worth."""
         paper = build_paper(

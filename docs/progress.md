@@ -2575,12 +2575,62 @@ Neither was visible to any test in this repo, because nothing here renders the c
    so the paper may well have landed and telling the student otherwise sends them to pay
    for a second run.
 
+### Gate 4 — a full paid run, end to end, in the browser
+
+The gap left open above. `.env` supplied the same afternoon, `quiz_default`, live
+`gemini-3.5-flash-lite`, DOM polled every 400 ms.
+
+```
+t=0.4s   prelude "Warming up the language models"    clock 0:00   detail ""
+t=31.2s  active [Writing questions]  done 2          clock 0:31
+         detail "Sending your material to the model, a few questions at a time."
+t=39.2s  detail "6 of 7 questions written."                       <- batch 1
+t=59.2s  detail "7 of 7 questions written."                       <- batch 2
+t=68.4s  detail "Rewriting 2 questions the checks sent back — 2 done."
+t=68.8s  active [Putting the paper together]  done 3
+t=69.2s  on the paper
+```
+
+Every event type fired, including `phase: "rewriting"` — designed from the code, never
+before observed. It reported against its own total (2), not the paper's 7, which is the
+thing that would otherwise have pushed the counter past the number of questions.
+
+Result: **6 items over 7 slots, 18 of 20 marks, 3 calls, 7,923 tokens, 37.6 s of pipeline
+wall clock, 1 regeneration pass.** Slot A-03 was rejected twice by `mcq_hygiene` and lost.
+
+### The defect that only a real run could produce
+
+The paper rendered its gap correctly and then printed above it:
+
+> This paper carries **18** of 20 marks. **0 questions** could not be built from your
+> material — they are marked below.
+
+Zero, over a gap it had just drawn. `Paper.tsx` was counting `summary.unfilled_slots`,
+which was `[]` — because **the solver had allocated every slot.** The item was lost later,
+at a validation gate. Two different reasons a slot is empty, recorded in two different
+places, and `fill_ratio` still read `1.0`.
+
+No fixture had ever produced a paper whose slots were allocated but not delivered; every
+existing test passed `unfilled=["A-02"]`, the solver-side reason. The renderer now counts
+`filled: false` off the items, and
+`test_p7_paper_document.py::TestUnfilledSlots::test_a_slot_lost_at_a_gate_is_a_gap_even_though_allocation_succeeded`
+pins the distinction.
+
+### A finding about OPTION_LENGTH_OUTLIER_RATIO, not acted on
+
+`mcq_hygiene` evaluated 7 and failed **3** on this run — all three the same rule, the
+max/median option-length outlier at `3.0` (measured 3.75x, 3.80x, 3.75x). A-05 survived on
+rewrite; A-03 failed twice and cost the paper a question and 2 marks.
+
+That is a 43% rejection rate on one gate on one real paper, from a threshold this file
+already records as **PROVISIONAL**. One run is not a rate (§1D) and nothing is changed on
+the strength of it. Recorded so the next person calibrating it starts with a number.
+
 ### Deliberately NOT claimed
 
-- **No full paid run through the stream.** No `GEMINI_API_KEY` was available in this
-  session, so the writing stage was exercised up to the model's rejection and no further.
-  The `writing → assembling → result` tail has unit coverage and real-HTTP coverage with a
-  stubbed pipeline; it has **not** been watched end to end against a real generation.
+- **One run, one blueprint.** `quiz_default` only. The `waiting` stage — a run queueing
+  behind another generation — has never fired against a real pipeline; its coverage is the
+  contention test, which takes the lock directly.
 - **"Checking sources" was cut from the design** (R6). It would tell a student their
   questions had been checked against the material. The stage is `assembling`.
 - **Questions do not land one at a time**, contrary to the original sketch. The duplication
@@ -2588,7 +2638,7 @@ Neither was visible to any test in this repo, because nothing here renders the c
 
 ```
 $ python -m pytest -q
-520 passed, 9 skipped        (was 499 / 9)
+521 passed, 9 skipped        (was 499 / 9)
 ```
 
 ### Files
