@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import queue
 import tempfile
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from coursegen import config
@@ -246,20 +247,50 @@ class ExamRequest(BaseModel):
     title: str
 
 
-@app.post("/api/exam")
-def generate_exam(request: ExamRequest) -> dict[str, Any]:
+def _require_disclosure() -> None:
     if not _disclosure_accepted:
         raise HTTPException(
             status_code=403,
             detail="Disclosure must be accepted before generating exams. "
                    "POST /api/disclosure/accept first.",
         )
+
+
+@app.post("/api/exam")
+def generate_exam(request: ExamRequest) -> dict[str, Any]:
+    _require_disclosure()
+    # Serialised: see _PIPELINE_LOCK. Held across the whole run because the
+    # artifacts only agree with the manifest once render has finished.
+    with _PIPELINE_LOCK:
+        result = _exam_outcome(request.blueprint_id, request.title)
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=result["detail"])
+    return result
+
+
+def _exam_outcome(
+    blueprint_id: str,
+    title: str,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Run one generation and map it onto the outcomes the contract freezes.
+
+    Shared by `/api/exam` and `/api/exam/stream` so the outcome space has exactly
+    one implementation. Two copies of `ok / empty / degraded / failed` is how the
+    route originally came to report every unexpected exception as `degraded` with
+    `fill_ratio: 0.0` — an HTTP 200 claiming a paper had been generated that
+    filled nothing, indistinguishable from a paper that genuinely filled nothing.
+
+    **Never raises.** Failure is the value `{"status": "failed", "detail": ...}`.
+    The JSON route turns that into a 500; the stream turns it into an `error`
+    event, because a stream cannot answer 500 once its headers are on the wire.
+    Making failure a value on both paths is what keeps them from diverging.
+
+    Does not take the pipeline lock — the caller does, because the stream needs to
+    know whether it had to wait in order to say so.
+    """
     try:
-        # Serialised: see _PIPELINE_LOCK. Held across the whole run because the
-        # artifacts only agree with the manifest once render has finished.
-        with _PIPELINE_LOCK:
-            result = _run_exam_pipeline(request.blueprint_id, request.title)
-        return result
+        return _run_exam_pipeline(blueprint_id, title, on_event=on_event)
     except BudgetExceeded:
         logger.warning("Generation degraded: quota limit reached")
         return {
@@ -296,15 +327,20 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
         # The two states R8 actually specifies - BudgetExceeded and
         # TimeoutException - are still degraded 200s, handled above.
         #
-        # 500 here. Traceback is logged, never sent to the client (R4).
+        # 500 on the JSON route, an `error` event on the stream. Traceback is
+        # logged, never sent to the client (R4).
         logger.exception("Unexpected generation error")
-        raise HTTPException(
-            status_code=500,
-            detail="Generation failed unexpectedly. Check the server logs.",
-        )
+        return {
+            "status": "failed",
+            "detail": "Generation failed unexpectedly. Check the server logs.",
+        }
 
 
-def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
+def _run_exam_pipeline(
+    blueprint_id: str,
+    title: str,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
     """Adapt `pipeline.generate_paper` to the API contract.
 
     The stage sequence lives in `coursegen/pipeline.py` and is shared with the
@@ -313,8 +349,23 @@ def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
     """
     from coursegen.pipeline import generate_paper
 
+    emit = on_event or (lambda _e: None)
+
+    # Model load is its own stage because on a cold process it is the single
+    # largest slice of the first request (E3.1) and it happens BEFORE the pipeline
+    # emits anything of its own. Without this the stream opens and then says
+    # nothing for tens of seconds, which is the exact failure a streamed progress
+    # display exists to prevent. On a warm process it passes in milliseconds.
+    try:
+        emit({"event": "stage", "stage": "loading", "state": "start"})
+    except Exception:  # noqa: BLE001 - telemetry never fails the run it narrates
+        pass
     reranker = _get_reranker()
     embed = _get_embed_model()
+    try:
+        emit({"event": "stage", "stage": "loading", "state": "done"})
+    except Exception:  # noqa: BLE001
+        pass
 
     def embedding_fn(texts: list[str]) -> list[list[float]]:
         out = embed.encode(
@@ -327,6 +378,7 @@ def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
         title=title,
         groundedness_scorer=lambda answer, src: float(reranker.predict([(answer, src)])[0]),
         embedding_fn=embedding_fn,
+        on_event=on_event,
     )
 
     # `coverage_ratio` is deliberately NOT returned (disconnected 2026-09-01). It
@@ -348,6 +400,85 @@ def _run_exam_pipeline(blueprint_id: str, title: str) -> dict[str, Any]:
             "answer_key_pdf": "/api/files/answer_key.pdf",
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Streamed generation
+# ---------------------------------------------------------------------------
+
+_STREAM_DONE = object()
+
+
+@app.post("/api/exam/stream")
+def generate_exam_streamed(request: ExamRequest) -> StreamingResponse:
+    """The same generation as `/api/exam`, narrated while it runs.
+
+    NDJSON — one JSON object per line — rather than SSE, because this is a POST
+    with a body and `EventSource` is GET-only. A browser reads it with
+    `response.body.getReader()`; there is no client library to add.
+
+    A sibling endpoint rather than a change to `/api/exam`: that shape is frozen in
+    `API-CONTRACT.md` and the static UI depends on it. This one is additive, and
+    the terminal `result` event carries **exactly** the `/api/exam` body so a
+    client has one result-handling path, not two that can drift.
+
+    ### The one place the two endpoints genuinely differ
+
+    A stream cannot answer HTTP 500: by the time anything goes wrong the status
+    line is long gone. Failure arrives as `{"event": "error", ...}` on a 200
+    response, and a client must treat that event exactly as it treats a 500 from
+    `/api/exam`. This is a real asymmetry, not an oversight — see `_exam_outcome`.
+    """
+    _require_disclosure()
+    blueprint_id, title = request.blueprint_id, request.title
+    events: "queue.Queue[Any]" = queue.Queue()
+
+    def run() -> None:
+        try:
+            # Non-blocking first, so a caller that has to queue behind another
+            # generation is TOLD it is queueing. The lock is otherwise a silent
+            # wait - API-CONTRACT.md warns that double-clicking Generate produces
+            # "a long silent wait" - and silence is what a stream exists to fix.
+            waited = not _PIPELINE_LOCK.acquire(blocking=False)
+            if waited:
+                events.put({"event": "stage", "stage": "waiting", "state": "start"})
+                _PIPELINE_LOCK.acquire()
+                events.put({"event": "stage", "stage": "waiting", "state": "done"})
+            try:
+                body = _exam_outcome(blueprint_id, title, on_event=events.put)
+            finally:
+                _PIPELINE_LOCK.release()
+            if body.get("status") == "failed":
+                events.put({"event": "error", "detail": body["detail"]})
+            else:
+                events.put({"event": "result", **body})
+        except BaseException:  # noqa: BLE001
+            # _exam_outcome does not raise, so reaching here means the harness
+            # around it broke. Still has to produce a terminal event: a consumer
+            # blocked on the queue would otherwise wait forever.
+            logger.exception("Exam stream failed outside the pipeline")
+            events.put({
+                "event": "error",
+                "detail": "Generation failed unexpectedly. Check the server logs.",
+            })
+        finally:
+            events.put(_STREAM_DONE)
+
+    def body_iter():
+        threading.Thread(target=run, name="exam-stream", daemon=True).start()
+        while True:
+            item = events.get()
+            if item is _STREAM_DONE:
+                return
+            yield _json.dumps(item) + "\n"
+
+    return StreamingResponse(
+        body_iter(),
+        media_type="application/x-ndjson",
+        # Reverse proxies that buffer would defeat the entire point of this
+        # endpoint, and would do it silently - the client just sees one late burst.
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------

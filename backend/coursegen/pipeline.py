@@ -75,6 +75,7 @@ def generate_paper(
     llm_client: Any = None,
     verify: bool = False,
     progress: Optional[Callable[[str], None]] = None,
+    on_event: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> PaperResult:
     """Produce one paper. The only place these stages are sequenced.
 
@@ -83,6 +84,23 @@ def generate_paper(
     supply none and still exercise the sequence. Passing `None` for a scorer
     leaves its gate SKIPPED in the manifest rather than silently passing — the
     distinction that stops an unchecked paper reading as a clean one.
+
+    ## Two telemetry channels, deliberately
+
+    `progress` takes a formatted line and is what the CLI prints. `on_event` takes
+    a structured dict and is what the HTTP stream forwards to a browser. They are
+    separate rather than one channel with a formatter because a UI needs to know
+    *which* stage started — a string that a client has to parse to find that out is
+    a contract nobody wrote down. `progress`'s lines are unchanged by `on_event`
+    existing; the CLI's output is byte-identical either way.
+
+    ## Why stages fire on start as well as on completion
+
+    Every `say()` line here fires *after* its stage finishes, which is the right
+    shape for a log and the wrong shape for a progress display: writing the items
+    is ~40 of the ~51 seconds of a first run, so a client told only about completed
+    stages sits on "choosing" for forty seconds with nothing to show. Each stage
+    therefore emits `state: "start"` before the work and `state: "done"` after.
     """
     from coursegen.exam.allocate import solve
     from coursegen.exam.generate import generate_exam
@@ -107,15 +125,42 @@ def generate_paper(
             emit(build())
         except Exception:  # noqa: BLE001 - a progress line is never worth a failure
             pass
+
+    fire = on_event or (lambda _e: None)
+
+    def event(kind: str, **fields: Any) -> None:
+        """Emit a structured event, under the same guarantee `say` gives.
+
+        A client that has disconnected mid-run makes the forwarding callback raise
+        on the next send. That must not become the reason a paper the student has
+        already paid for never gets written to disk.
+        """
+        try:
+            fire({"event": kind, **fields})
+        except Exception:  # noqa: BLE001 - see say()
+            pass
+
+    def stage(name: str, state: str, **fields: Any) -> None:
+        event("stage", stage=name, state=state, **fields)
+
     data_dir = data_dir or config.DATA_DIR
     output_dir = output_dir or config.OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---- reading -----------------------------------------------------------
+    stage("reading", "start")
     blueprint = load_blueprint(blueprint_id)
     if nodes is None:
         nodes = load_course_map(config.COURSE_MAP_PATH)
     say(lambda: f"course map: {len(nodes)} nodes")
+    stage("reading", "done", topics=len(nodes))
 
+    # ---- choosing ----------------------------------------------------------
+    # `read_spans` sits inside this stage rather than in its own. It fetches the
+    # passages for the slots `solve` just chose, so the stage ends when we know
+    # both what to ask about and have the text in hand — which is what the label
+    # claims, and the only grouping that keeps the order honest.
+    stage("choosing", "start")
     specs, coverage = solve(nodes, blueprint)
     say(lambda: f"allocated {len(specs)}/{coverage.slots_total} slots "
               f"(fill {coverage.fill_ratio:.0%}, "
@@ -123,7 +168,11 @@ def generate_paper(
 
     chunk_ids = sorted({sid for spec in specs for sid in spec.span_ids})
     span_text, span_source = read_spans(chunk_ids, data_dir)
+    stage("choosing", "done", slots=len(specs), slots_total=coverage.slots_total,
+          sections=len(blueprint.sections))
 
+    # ---- writing -----------------------------------------------------------
+    stage("writing", "start", total=len(specs))
     client = llm_client or LLMClient()
     result = generate_exam(
         specs=specs,
@@ -136,13 +185,26 @@ def generate_paper(
         blueprint_id=blueprint.blueprint_id,
         groundedness_scorer=groundedness_scorer,
         embedding_fn=embedding_fn,
+        on_progress=lambda phase, done, total: event(
+            "batch", phase=phase, done=done, total=total
+        ),
     )
     # .get, not [] — a progress message must never be able to fail the run it is
     # narrating. Subscripting here turned an absent manifest key into a KeyError
     # that killed generation.
     say(lambda: f"generated {len(result.items)} items, "
               f"{result.manifest.get('call_count', '?')} calls")
+    stage("writing", "done", items=len(result.items),
+          calls=result.manifest.get("call_count"))
 
+    # ---- assembling --------------------------------------------------------
+    # Named for what happens: the factuality gate (when it is on), then rendering
+    # the documents. UI-DESIGN.md called this stage "Checking sources", which R6
+    # forbids — it would tell a student their questions had been checked against
+    # the material, and nothing here establishes that a question is TRUE. The
+    # gates that do run (schema, relevance, duplication, MCQ hygiene) run inside
+    # `writing`, and they check relevance, not correctness.
+    stage("assembling", "start")
     manifest = dict(result.manifest)
     factuality_summary, verdict_by_slot = _run_factuality_gate(
         result.items, specs, span_text, client, verify, say
@@ -176,6 +238,7 @@ def generate_paper(
     (output_dir / "run_manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8"
     )
+    stage("assembling", "done")
     return PaperResult(
         items=result.items, coverage=coverage, manifest=manifest,
         artifacts=artifacts, blueprint=blueprint,

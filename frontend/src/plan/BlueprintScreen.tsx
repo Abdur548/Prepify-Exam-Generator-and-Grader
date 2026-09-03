@@ -25,7 +25,10 @@ const PRESETS = [
 type Status = "idle" | "loading" | "ready" | "error";
 
 interface Props {
-  onGenerate?: (blueprintId: string) => void;
+  /** The plan travels with the id: the generating screen draws its skeleton from
+   *  the dry run the student just read, so it must not re-fetch and risk showing
+   *  them a different set of numbers than the ones they pressed Generate on. */
+  onGenerate?: (blueprintId: string, plan: Plan) => void;
 }
 
 export function BlueprintScreen({ onGenerate }: Props) {
@@ -222,7 +225,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
                 <button
                   type="button"
                   className="generate"
-                  onClick={() => onGenerate?.(blueprintId)}
+                  onClick={() => onGenerate?.(blueprintId, plan)}
                 >
                   Write these {plan.summary.slots_planned} questions
                 </button>

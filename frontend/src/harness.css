@@ -15,3 +15,21 @@
   font: inherit; font-size: var(--t-xs); padding: 4px 10px; border-radius: 4px;
 }
 .harness__nav button.on { background: rgb(255 255 255 / 0.12); color: #fff; }
+.harness__nav button:disabled { opacity: 0.4; cursor: default; }
+
+/* A run that came back `degraded` or `empty` still came back. Amber, not red:
+   both are 200s with a real paper behind them, and red would read as a failure
+   the student should not trust. */
+.notice {
+  max-width: var(--paper-width);
+  margin: 0 auto var(--s-5);
+  padding: var(--s-4) var(--s-5);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.notice__lead { margin: 0; font-size: var(--t-sm); color: var(--ink); }
+.notice__list {
+  margin: var(--s-2) 0 0; padding-left: 1.1em;
+  font-size: var(--t-xs); color: var(--graphite); line-height: 1.6;
+}

@@ -32,12 +32,25 @@ def generate_exam(
     groundedness_scorer: GroundednessScorer | None = None,
     embedding_fn: Callable[[list[str]], list[list[float]]] | None = None,
     span_source_by_id: dict[str, tuple[str, int]] | None = None,
+    on_progress: Callable[[str, int, int], None] | None = None,
 ) -> GenerationResult:
     """
     `blueprint_id` is required, not optional: R7 says a run_manifest must be enough
     to regenerate the exact same ItemSpec[], and ItemSpec[] is a function of the
     course map AND the blueprint. A manifest carrying only course_map_hash cannot
     tell a midterm run from a final one, so the run is not reproducible from it.
+
+    `on_progress(phase, done, total)` fires after each LLM batch returns. It exists
+    because this function is where ~40 of the ~51 seconds of a first run are spent,
+    and a caller that cannot see inside it can only show a spinner. Two phases are
+    reported separately — `"writing"` and `"rewriting"` — because a rewrite pass is
+    not more of the same work: it is the second attempt at items the gates rejected,
+    and collapsing the two would make the count run past the total.
+
+    What it deliberately does NOT report is individual accepted items. No item is
+    final until every batch has returned, because the duplication gate compares
+    items against each other. An item streamed as accepted at t=10s can still be
+    rejected at t=40s, so streaming them would be a claim the pipeline cannot keep.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +71,14 @@ def generate_exam(
             cache_hits += 1
             items_by_slot[spec.slot_id] = cached
 
-    raw_items = _call_batches(uncached_specs, span_text_by_id, llm_client)
+    # Counted against every slot in the paper, not just the uncached ones. A run
+    # that hits the cache for half its slots is genuinely half done before the
+    # first call goes out, and reporting "0 of 20" there would understate it.
+    raw_items = _call_batches(
+        uncached_specs, span_text_by_id, llm_client,
+        on_batch=(lambda done: on_progress("writing", cache_hits + done, len(specs)))
+        if on_progress else None,
+    )
     _stamp_source_refs(raw_items, uncached_specs, span_source_by_id)
     valid, issues, gates = validate_generated_items(
         specs=uncached_specs,
@@ -77,7 +97,11 @@ def generate_exam(
     if flagged_slots and config.MAX_REGENERATION_PASSES > 0:
         regeneration_passes = 1
         regen_specs = [s for s in uncached_specs if s.slot_id in set(flagged_slots)]
-        regen_raw = _call_batches(regen_specs, span_text_by_id, llm_client)
+        regen_raw = _call_batches(
+            regen_specs, span_text_by_id, llm_client,
+            on_batch=(lambda done: on_progress("rewriting", done, len(regen_specs)))
+            if on_progress else None,
+        )
         _stamp_source_refs(regen_raw, regen_specs, span_source_by_id)
         regen_valid, regen_issues, regen_gates = validate_generated_items(
             specs=regen_specs,
@@ -156,6 +180,7 @@ def _call_batches(
     specs: list[ItemSpec],
     span_text_by_id: dict[str, str],
     llm_client: Any,
+    on_batch: Callable[[int], None] | None = None,
 ) -> list[dict[str, Any]]:
     raw_items: list[dict[str, Any]] = []
     for start in range(0, len(specs), config.BATCH_SIZE):
@@ -165,6 +190,16 @@ def _call_batches(
         messages = build_generation_messages(batch, span_text_by_id)
         response = llm_client.call(messages, response_schema=_response_schema())
         raw_items.extend(_extract_items(response))
+        if on_batch is not None:
+            # Slots asked for, not items returned. A batch that comes back short
+            # has still consumed its specs, and a progress bar that stalls because
+            # the model returned 5 of 6 is reporting on the model, not on the run.
+            # Swallowed for the same reason `pipeline.say` swallows: telemetry that
+            # can kill the operation it narrates is worse than no telemetry.
+            try:
+                on_batch(min(start + len(batch), len(specs)))
+            except Exception:  # noqa: BLE001
+                pass
     return raw_items
 
 

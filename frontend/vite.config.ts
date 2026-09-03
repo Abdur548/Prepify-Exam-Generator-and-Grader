@@ -8,7 +8,13 @@ export default defineConfig({
     // exclusive file lock, so it cannot be forked). Proxying keeps the browser
     // on one origin and avoids CORS in development.
     proxy: {
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      // Overridable so the dev frontend can be pointed at a second backend —
+      // needed whenever one is already holding :8000 (and the Qdrant lock with
+      // it), which is the normal state while a generation is running.
+      "/api": {
+        target: process.env.PREPIFY_API ?? "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
     },
   },
 });

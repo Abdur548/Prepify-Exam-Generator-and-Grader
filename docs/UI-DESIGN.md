@@ -184,10 +184,23 @@ duration; then section rows (`Section A · 10 × MCQ · 2 marks`), then the live
 `20 QUESTIONS · 100 MARKS · 5 SECTIONS · 180 MIN`. Preview pane shows the empty paper
 taking shape as they configure — the paper exists before it is filled.
 
-**3 · Generating** — not a modal spinner. The paper skeleton is on screen and questions
-land into it one at a time, each arriving with its citation. Stage line beneath:
-`Reading your material → Choosing what to ask → Writing questions → Checking sources`.
-Those are the real pipeline stages; the progress is honest.
+**3 · Generating** — not a modal spinner. The paper skeleton is on screen from the first
+frame, drawn from the dry run the student just read, and the stage line beneath it is
+streamed from the run itself over `POST /api/exam/stream`:
+`Reading your material → Choosing what to ask → Writing questions → Putting the paper together`.
+
+Two corrections to the original sketch, both from building it (2026-09-03):
+
+- **"Checking sources" was cut.** It would tell a student their questions had been checked
+  against the material, which is the claim R6 forbids — nothing establishes that a
+  generated question is *true*. The gates that do run check relevance and duplication, and
+  they run inside *Writing questions*. The stage is named for what it does: laying out the
+  paper and the answer key.
+- **Questions do not land one at a time.** The duplication gate compares items against each
+  other, so nothing is final until every batch is back — an item shown as written at ten
+  seconds can still be rejected at forty. The placeholders therefore pulse together rather
+  than in sequence, and the honest per-second signal is the batch counter
+  (`12 of 20 questions written`), which is real.
 
 **4 · Paper** — the artifact. Serif, marks rail, section rules, general instructions.
 Per question: the trace highlight and the drag-to-source. Header actions: Download PDF,
@@ -209,7 +222,7 @@ These are measured, not guesses (`docs/FRONTEND-BRIEF.md`).
 
 | reality | design consequence |
 |---|---|
-| first request ~51 s | the generating screen must show *stages*, never a bare spinner |
+| first request ~51 s (~24 s of it the model load) | the generating screen must show *stages*, never a bare spinner. Built: `/api/exam/stream` |
 | ingest ~10 min, no progress stream | upload screen owns a long wait: per-file states, honest "this takes about ten minutes", and it must survive a refresh |
 | one generation at a time (process lock) | disable Generate on submit; a second attempt blocks silently, so the UI must never imply a queue |
 | four outcomes: `ok` / `empty` / `degraded` / 500 | four distinct states. `degraded` is a **partial paper you can still use**, not an error — show what came back plus what did not |
@@ -234,7 +247,7 @@ complete and usable — the missing six are marked."*
 1. Design tokens + the three type roles.
 2. **Paper renderer** — serif, marks rail, sections, instructions. Everything else hangs off it.
 3. Blueprint form with live counters, two-pane against the paper.
-4. Generating screen with real stages.
+4. ~~Generating screen with real stages.~~ **Done** 2026-09-03 — needed a streaming endpoint first.
 5. Provenance drag (landing + in-app, one component).
 6. Upload with the long wait.
 7. Chat with `from_material`.

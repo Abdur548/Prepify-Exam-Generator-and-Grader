@@ -114,13 +114,62 @@ back, and do not compute an equivalent in the frontend. `fill_ratio` is the comp
 number; `allocation_fidelity` is the share of slots placed by instructional mass rather
 than by span exhaustion.
 
-Degraded body carries the same keys minus `downloads`, with `status: "degraded"` and a
-`warnings` array that is safe to show verbatim.
+Degraded body carries `status: "degraded"`, a `warnings` array safe to show verbatim, and
+no `downloads`. It also carries `items: []` where a successful body carries `items_count`
+— these two shapes are **not** the same key set, and a client that reads `items_count`
+unconditionally gets `undefined` on a degraded run.
 
 **Serialised.** One generation at a time, process-wide (`_PIPELINE_LOCK`). A second
 concurrent request **blocks until the first finishes** — it does not fail and does not
 queue visibly. Double-clicking Generate produces a long silent wait. The UI must disable
-the control on submit.
+the control on submit. (`/api/exam/stream` announces the wait instead — see below.)
+
+### `POST /api/exam/stream` → 200 / 403
+
+Added 2026-09-03. The same generation as `/api/exam`, narrated while it runs. Request body
+is identical. Response is **NDJSON** — `application/x-ndjson`, one JSON object per line —
+read in a browser with `response.body.getReader()`. Not SSE: this is a POST with a body
+and `EventSource` is GET-only.
+
+```
+{"event":"stage","stage":"loading","state":"start"}
+{"event":"stage","stage":"loading","state":"done"}
+{"event":"stage","stage":"reading","state":"start"}
+{"event":"stage","stage":"reading","state":"done","topics":571}
+{"event":"stage","stage":"choosing","state":"start"}
+{"event":"stage","stage":"choosing","state":"done","slots":7,"slots_total":7,"sections":2}
+{"event":"stage","stage":"writing","state":"start","total":7}
+{"event":"batch","phase":"writing","done":6,"total":7}
+{"event":"batch","phase":"writing","done":7,"total":7}
+{"event":"stage","stage":"writing","state":"done","items":7,"calls":2}
+{"event":"stage","stage":"assembling","state":"start"}
+{"event":"stage","stage":"assembling","state":"done"}
+{"event":"result", ...exactly the /api/exam body...}
+```
+
+| event | when |
+|---|---|
+| `stage` | each pipeline stage, on `start` and again on `done`. Both, because `writing` is ~40 of the ~51 seconds and a client told only about completions sits still through it |
+| `batch` | after each LLM batch returns. `phase` is `writing` or `rewriting`; the second is a re-attempt at items the gates rejected, counted against its own total |
+| `result` | terminal. **Byte-identical to the `/api/exam` body** — one outcome space, one client code path |
+| `error` | terminal. See below |
+
+**Two stages are conditional.** `waiting` fires only when the run had to queue behind
+another generation; `loading` only wraps the model load, which is instant on a warm
+process and ~24 s cold (measured 2026-09-03). Neither is pipeline work — show them apart
+from the four real stages so the stage list does not change length between runs.
+
+**Failure is an `error` event on a 200, never a status code.** By the time generation
+breaks, the status line is long gone. A client must treat `{"event":"error","detail":...}`
+exactly as it treats a 500 from `/api/exam`. 403 is the exception: the disclosure gate is
+checked before streaming starts, so it still arrives as a JSON 403.
+
+**A stream can also just end.** If the connection closes with neither `result` nor
+`error`, the server went away mid-run — the documented case is the OS killing the process
+during the model load, which is an access violation no handler can catch and therefore
+cannot be reported. Treat a terminated stream with no terminal event as a failure, but
+**not** as "nothing was written": the pipeline runs in its own thread and does not stop
+when the connection does, so the paper may well have landed. Check `/api/paper`.
 
 ### `POST /api/chat` → 200
 ```json

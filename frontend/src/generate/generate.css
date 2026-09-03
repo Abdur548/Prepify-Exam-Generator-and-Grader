@@ -1,0 +1,277 @@
+/* The generating screen.
+ *
+ * The chrome is grotesque (it is the tool); the skeleton beneath it inherits
+ * `paper.css` untouched (it is the exam, and it has to be the SAME geometry the
+ * finished paper lands in, not a copy of its measurements).
+ *
+ * --trace does not appear on this screen at all. Nothing here is provenance yet:
+ * the questions have no sources until they exist.
+ */
+
+.gen {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+}
+
+.gen__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-5);
+}
+
+.gen__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.gen__sub {
+  margin: var(--s-2) 0 0;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+}
+
+/* The clock is evidence about the run, so it is mono. */
+.gen__clock {
+  flex: none;
+  text-align: right;
+}
+
+.gen__time {
+  display: block;
+  font-family: var(--face-evidence);
+  font-size: var(--t-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.gen__expect {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+/* Preconditions — queueing, or the model load. Stated plainly: neither is a
+   fault, so neither gets warning styling. */
+.gen__prelude {
+  margin: var(--s-5) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+}
+
+/* ---------- stage rail ---------- */
+
+.rail {
+  margin: var(--s-5) 0 var(--s-6);
+  padding: var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+}
+
+.rail__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  padding-top: var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+/* The connector runs behind the dots, drawn per step so a completed step's line
+   is the thing that fills — no separate track element to keep in sync. */
+.step::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--rule);
+}
+
+.step--done::before,
+.step--active::before {
+  background: var(--slate);
+}
+
+.step__dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--app-bg);
+  border: 2px solid var(--rule-strong);
+}
+
+.step--done .step__dot {
+  background: var(--slate);
+  border-color: var(--slate);
+}
+
+.step--active .step__dot {
+  background: #fff;
+  border-color: var(--slate);
+  animation: gen-pulse 1.6s ease-in-out infinite;
+}
+
+.step--done,
+.step--active {
+  color: var(--ink);
+}
+
+.step--active .step__label {
+  font-weight: 600;
+}
+
+.rail__detail {
+  margin: var(--s-4) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+@keyframes gen-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(35 41 54 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(35 41 54 / 0);
+  }
+}
+
+/* ---------- the skeleton ---------- */
+
+/* Slightly receded: it is the shape of the paper, not the paper. */
+.gen__skeleton {
+  opacity: 0.75;
+}
+
+.ghost {
+  display: grid;
+  gap: var(--s-2);
+  padding-top: 0.35em;
+}
+
+.ghost__line {
+  display: block;
+  height: 0.7em;
+  border-radius: 3px;
+  background: var(--paper-edge);
+}
+
+.ghost__line--a {
+  width: 92%;
+}
+
+.ghost__line--b {
+  width: 61%;
+}
+
+/* Every placeholder breathes on the same beat. A staggered shimmer would read as
+   questions arriving one by one, which is precisely what the pipeline cannot
+   report — no item is final until every batch is back. */
+.gen__skeleton--busy .ghost__line {
+  animation: gen-breathe 1.9s ease-in-out infinite;
+}
+
+@keyframes gen-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ---------- failure ---------- */
+
+.gen__failure {
+  margin-top: var(--s-6);
+  padding: var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--stop);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  max-width: 40rem;
+}
+
+.gen__failmsg {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.gen__failhint {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.gen__failacts {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+}
+
+.gen__btn {
+  padding: var(--s-2) var(--s-4);
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.gen__btn--go {
+  background: var(--slate);
+  color: #fff;
+  border-color: var(--slate);
+  font-weight: 600;
+}
+
+.gen__btn--go:hover {
+  background: var(--slate-soft);
+}
+
+@media (max-width: 44rem) {
+  .rail__steps {
+    grid-template-columns: 1fr;
+    gap: var(--s-4);
+  }
+
+  /* Stacked, the connector would be a stray horizontal dash beside each label. */
+  .step::before {
+    display: none;
+  }
+
+  .step {
+    padding: 0 0 0 var(--s-5);
+  }
+
+  .step__dot {
+    top: 3px;
+  }
+}
