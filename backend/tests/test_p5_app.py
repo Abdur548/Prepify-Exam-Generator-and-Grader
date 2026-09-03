@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from coursegen import config
+
 
 def _import_preflight():
     try:
@@ -418,6 +420,12 @@ class TestExamPipelineWiring:
         )
         fake_result = GenerationResult(items=[], manifest={})
 
+        # OUTPUT_DIR is redirected at tmp_path because generate_paper writes
+        # paper.json itself - it is not one of the patched stages. Without this
+        # the test overwrites the real generated paper in backend/output/, which
+        # is how a browser test previously destroyed the ingested corpus. A test
+        # must not write into the product's own output directory.
+        monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path)
         with patch("coursegen.pipeline.load_blueprint", return_value=blueprint), \
              patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes), \
              patch("coursegen.exam.allocate.solve", return_value=(specs, coverage)), \
@@ -465,6 +473,12 @@ class TestExamPipelineWiring:
             answer_key_pdf=tmp_path / "answer_key.pdf",
         )
 
+        # OUTPUT_DIR is redirected at tmp_path because generate_paper writes
+        # paper.json itself - it is not one of the patched stages. Without this
+        # the test overwrites the real generated paper in backend/output/, which
+        # is how a browser test previously destroyed the ingested corpus. A test
+        # must not write into the product's own output directory.
+        monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path)
         with patch("coursegen.pipeline.load_blueprint", return_value=blueprint), \
              patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes), \
              patch("coursegen.exam.allocate.solve", return_value=(specs, coverage)), \

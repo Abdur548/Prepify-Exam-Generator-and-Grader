@@ -169,6 +169,28 @@ async def ingest_files(files: list[UploadFile]) -> dict[str, Any]:
 # File serving
 # ---------------------------------------------------------------------------
 
+@app.get("/api/paper")
+def get_paper() -> dict[str, Any]:
+    """The most recently generated paper, as structured data.
+
+    Separate from POST /api/exam rather than folded into its response, for two
+    reasons. Generation takes the better part of a minute, so a refresh mid-wait
+    must not lose the paper. And the generation response is a summary a caller
+    polls; the paper is a document a client renders, and the two have different
+    lifetimes.
+
+    404 when nothing has been generated yet — an empty paper would be
+    indistinguishable from a real one that produced no questions.
+    """
+    path = config.OUTPUT_DIR / "paper.json"
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No paper has been generated yet.",
+        )
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
 @app.get("/api/files/{filename}")
 def get_file(filename: str) -> FileResponse:
     # Prevent directory traversal — only allow the bare filename.

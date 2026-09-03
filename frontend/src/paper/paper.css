@@ -1,0 +1,352 @@
+/* The paper surface.
+ *
+ * Everything inside .paper is the SERIF world — it is the exam. The marks rail
+ * and citations are MONO — they are evidence about the exam. Controls are the
+ * grotesque — they are the tool. Nothing here uses --trace except provenance.
+ */
+
+.paper {
+  max-width: var(--paper-width);
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-6) var(--s-8);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-paper);
+  font-family: var(--face-paper);
+  color: var(--ink);
+}
+
+/* ---------- head ---------- */
+
+.paper__title {
+  margin: 0;
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+.paper__subtitle {
+  margin: var(--s-1) 0 0;
+  text-align: center;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+}
+
+/* The meta row sits between two rules — the bracket every real exam paper has. */
+.paper__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-top: var(--s-5);
+  padding: var(--s-2) 0;
+  border-top: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.paper__meta b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.paper__instructions {
+  margin-top: var(--s-5);
+}
+
+.paper__instructions h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.paper__instructions ol {
+  margin: 0;
+  padding-left: 1.4em;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+  line-height: 1.7;
+}
+
+.paper__shortfall {
+  margin: var(--s-5) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+/* ---------- sections ---------- */
+
+.section {
+  margin-top: var(--s-7);
+}
+
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--s-2);
+  margin: 0;
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--rule-strong);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  text-align: center;
+}
+
+.section__label {
+  font-family: var(--face-evidence);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+.section__instruction {
+  margin: var(--s-2) 0 0;
+  text-align: center;
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
+
+.section__filtered {
+  margin: var(--s-5) 0 0;
+  padding: var(--s-4);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+  text-align: center;
+}
+
+/* ---------- items ---------- */
+
+/* The marks rail. Its width is fixed so every [n] aligns down the page, which is
+   what makes it read as a margin rather than as trailing text. */
+.item {
+  display: grid;
+  grid-template-columns: 1fr var(--marks-rail);
+  gap: var(--s-4);
+  margin-top: var(--s-5);
+}
+
+.item__marks {
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+  text-align: right;
+  padding-top: 0.2em;
+  white-space: nowrap;
+}
+
+.item__stem {
+  margin: 0;
+  font-size: var(--t-md);
+  line-height: 1.65;
+}
+
+.item__number {
+  font-weight: 700;
+  margin-right: 0.5em;
+}
+
+.item--gap .item__body {
+  padding: var(--s-3) var(--s-4);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+}
+
+.item__gaptext {
+  margin: 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+}
+
+.item--gap .item__marks {
+  color: var(--graphite-light);
+}
+
+/* Options in two columns, the way a printed paper sets them. Collapses on
+   narrow screens, where two columns would wrap mid-phrase. */
+.options {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2) var(--s-5);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  font-size: var(--t-md);
+}
+
+.options__row {
+  display: flex;
+  gap: 0.5em;
+  line-height: 1.5;
+}
+
+.options__label {
+  color: var(--graphite);
+}
+
+/* ---------- provenance ---------- */
+
+.item__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  font-family: var(--face-tool);
+}
+
+.cite {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 3px var(--s-2) 3px 3px;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.cite:hover {
+  border-color: var(--rule-strong);
+}
+
+/* The only saturated colour in the product, and it means exactly one thing. */
+.cite__mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--trace);
+  flex: none;
+}
+
+.cite__ref {
+  font-family: var(--face-evidence);
+  color: var(--trace-deep);
+}
+
+/* A synthesis question. No trace colour, no badge, no warning icon — the absence
+   of the highlight is the signal, and it cannot be misread as an error. */
+.cite--none {
+  border-style: dashed;
+  color: var(--graphite-light);
+  cursor: default;
+  padding: 3px var(--s-3);
+}
+
+.reveal {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.reveal:hover {
+  color: var(--ink);
+}
+
+/* ---------- source panel ---------- */
+
+.source {
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+  background: var(--trace-wash);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--trace);
+}
+
+.source__ref {
+  margin: 0 0 var(--s-2);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--trace-deep);
+}
+
+.source__text {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--t-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.source__note {
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.answer {
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.answer__value {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.answer__why {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-sm);
+  color: var(--graphite);
+  line-height: 1.65;
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 40rem) {
+  .paper {
+    padding: var(--s-5) var(--s-4) var(--s-6);
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  /* The rail moves under the question rather than squeezing the column. */
+  .item {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+
+  .item__marks {
+    text-align: left;
+    order: -1;
+  }
+
+  .options {
+    grid-template-columns: 1fr;
+  }
+
+  .paper__meta {
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+}

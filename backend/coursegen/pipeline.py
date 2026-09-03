@@ -144,15 +144,34 @@ def generate_paper(
               f"{result.manifest.get('call_count', '?')} calls")
 
     manifest = dict(result.manifest)
-    manifest["factuality"] = _run_factuality_gate(
+    factuality_summary, verdict_by_slot = _run_factuality_gate(
         result.items, specs, span_text, client, verify, say
     )
+    manifest["factuality"] = factuality_summary
 
     artifacts = render_exam_artifacts(
         items=result.items,
         coverage_report=coverage,
         output_dir=output_dir,
         title=title,
+    )
+
+    # The same paper as structured data, beside the rendered documents. A client
+    # cannot badge provenance, filter synthesis items or reveal a source passage
+    # from exam.html, and until this was written the API exposed only a count.
+    from coursegen.exam.paper import build_paper
+
+    paper = build_paper(
+        items=result.items,
+        specs=specs,
+        blueprint=blueprint,
+        coverage=coverage,
+        title=title,
+        span_text_by_id=span_text,
+        factuality=verdict_by_slot,
+    )
+    (output_dir / "paper.json").write_text(
+        json.dumps(paper, indent=2, sort_keys=True), encoding="utf-8"
     )
     (output_dir / "run_manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, indent=2), encoding="utf-8"
@@ -163,7 +182,9 @@ def generate_paper(
     )
 
 
-def _run_factuality_gate(items, specs, span_text, client, verify: bool, say) -> dict[str, Any]:
+def _run_factuality_gate(
+    items, specs, span_text, client, verify: bool, say
+) -> tuple[dict[str, Any], dict[str, str]]:
     """Gate 5, and an honest record when it did not run.
 
     `{"skipped": True}` rather than an absent key or a zero count: a caller that
@@ -172,7 +193,7 @@ def _run_factuality_gate(items, specs, span_text, client, verify: bool, say) -> 
     misleading for a week.
     """
     if not verify:
-        return {"skipped": True}
+        return {"skipped": True}, {}
 
     from coursegen.exam.verify import summarise, verify_items
 
@@ -183,4 +204,4 @@ def _run_factuality_gate(items, specs, span_text, client, verify: bool, say) -> 
     summary["skipped"] = False
     say(lambda: f"factuality: {summary['supported']}/{summary['checked']} "
               f"supported ({summary['not_applicable']} not applicable)")
-    return summary
+    return summary, {slot: v.verdict for slot, v in verdicts.items()}
