@@ -2494,3 +2494,108 @@ lower for doing the thing it exists to do.
   that pin the metric finding and the one asserting `solver_flat` is never graded on the
   objective it optimised.
 
+
+---
+
+## 2026-09-03 — Streamed generation, and the generating screen
+
+**Status: PASS on its own declared gate.** The gate for this work is that the stages a
+student sees come from the run rather than from a clock, and that the lines reach the
+browser as they are produced. Both were measured against a live server, not asserted.
+
+### Why this was not a frontend-only task
+
+`docs/UI-DESIGN.md` §5.3 said *"Those are the real pipeline stages; the progress is
+honest."* The backend could not keep that: `POST /api/exam` blocks for the whole run and
+returns a summary, and the route dropped the `progress` callback `generate_paper` already
+accepted. The only way to build the screen as specified was to make the claim true first.
+
+### Gate 1 — the lines are not buffered
+
+`tests/test_p7_stream.py::TestOverRealHttp` starts real uvicorn on a free port and times
+arrivals against a pipeline that sleeps 0.4 s between two events. Buffered, both land
+together and the delta is ~0.
+
+```
+$ python -m pytest tests/test_p7_stream.py::TestOverRealHttp -q
+..                                                                       [100%]
+EXIT=0
+```
+
+### Gate 2 — the stages come from the pipeline, in a browser
+
+Chromium against `vite` → a live backend, DOM polled every 500 ms. Fake API key, so the
+run reaches the model and is rejected: **zero quota spent.**
+
+```
+t=0.5s   prelude "Warming up the language models"   clock 0:00   (stream flushed at once)
+t=24.5s  active [Reading your material]             clock 0:24   (model load, real)
+t=25.0s  active [Writing questions]  done [Reading, Choosing]
+         detail "Sending your material to the model, a few questions at a time."
+t=27.0s  "Generation failed unexpectedly. Check the server logs."   (error event, HTTP 200)
+```
+
+The shape of that is the finding: **the model load is 24.5 of 27 s**, and reading plus
+choosing complete inside half a second. The four-stage rail therefore spends almost all of
+its life on one stage, which is why `generate_exam` gained `on_progress` — the batch
+counter is the only thing that moves during the part that takes the time.
+
+### Gate 3 — six mutations, all caught
+
+```
+CAUGHT (test failed)     coursegen/exam/generate.py: on_batch(min(start + len(batch), len(specs)))
+CAUGHT (test failed)     coursegen/exam/generate.py: if on_batch is not None:
+CAUGHT (test failed)     coursegen/app/main.py: if body.get("status") == "failed":
+CAUGHT (test failed)     coursegen/pipeline.py: stage("writing", "start", total=len(specs))
+CAUGHT (test failed)     coursegen/pipeline.py: stage("choosing", "done", slots=len(specs), slots_total=
+CAUGHT (test failed)     coursegen/app/main.py: events.put({"event": "stage", "stage": "waiting", "state
+```
+
+The fourth is the one worth recording. On the first pass it read **NOT CAUGHT**: deleting
+the pipeline's `writing` emission left the stage-order test green, because that test
+patched `_run_exam_pipeline` wholesale and was therefore asserting on events its own fake
+had produced. R1, exactly — a test whose subject is mocked out says nothing about the
+subject. `TestTheRealPipelineEmitsTheStages` calls `generate_paper` itself and closes it.
+
+### Two defects found only by running it
+
+Neither was visible to any test in this repo, because nothing here renders the component.
+
+1. **StrictMode's teardown killed the listener.** The run guarded its *start* with a ref
+   but kept `live` in the effect closure. StrictMode ran the effect, tore it down (setting
+   `live` false, clearing the ticker) and ran it again, where the guard returned early and
+   rebuilt neither. The server answered 403 and every `setState` was dropped by a flag
+   nothing would set back. The screen sat on the first frame with the clock at 0:00 over a
+   run that was working correctly.
+
+2. **A stream that ends without a terminal event left the rail live forever.** The
+   documented case is the OS killing the process during the model load — an access
+   violation no handler can catch, so it cannot arrive as an `error` event. Now surfaced,
+   and deliberately **not** as "nothing was written": the pipeline outlives the connection,
+   so the paper may well have landed and telling the student otherwise sends them to pay
+   for a second run.
+
+### Deliberately NOT claimed
+
+- **No full paid run through the stream.** No `GEMINI_API_KEY` was available in this
+  session, so the writing stage was exercised up to the model's rejection and no further.
+  The `writing → assembling → result` tail has unit coverage and real-HTTP coverage with a
+  stubbed pipeline; it has **not** been watched end to end against a real generation.
+- **"Checking sources" was cut from the design** (R6). It would tell a student their
+  questions had been checked against the material. The stage is `assembling`.
+- **Questions do not land one at a time**, contrary to the original sketch. The duplication
+  gate compares items against each other, so nothing is final until every batch is back.
+
+```
+$ python -m pytest -q
+520 passed, 9 skipped        (was 499 / 9)
+```
+
+### Files
+
+- `coursegen/app/main.py` — `POST /api/exam/stream`; `_exam_outcome()` shared with `/api/exam`.
+- `coursegen/pipeline.py` — `on_event`, stage boundaries with `start` as well as `done`.
+- `coursegen/exam/generate.py` — `on_progress`, per-batch, capped at the paper's slot count.
+- `frontend/src/generate/` — the screen, the NDJSON reader, the event types.
+- `tests/test_p7_stream.py` — 21 tests across transport, parity, failure, contention,
+  batch progress, the real pipeline, and real HTTP.
