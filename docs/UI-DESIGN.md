@@ -244,9 +244,17 @@ complete and usable — the missing six are marked."*
 
 ## 8. Open questions
 
-1. **Who is the primary user** — the student revising, or the instructor setting? TestMacher
-   is teacher-first, Scholarly student-first. The backend serves both; the UI cannot centre
-   both. My read: **student**, because the citation-back-to-your-own-slides feature is
-   worthless to a teacher who wrote the slides.
+1. ~~Who is the primary user?~~ **DECIDED 2026-09-02: the student revising.** TestMacher is
+   teacher-first and we are not copying that. Consequences, since this decision reaches
+   almost every screen:
+   - The upload is *"your lecture slides"*, not *"your question bank"*. The corpus belongs
+     to the person sitting the exam.
+   - Provenance is the core feature rather than a footnote: a teacher who wrote the slides
+     gains nothing from a citation back to them, a student revising gains everything.
+   - Copy is second person and revision-shaped — "practise", "check your answer", "find this
+     in your notes" — not "set", "assign" or "class".
+   - Sit-the-exam mode (§5.5) moves from *nice-to-have* to the natural phase 2, because a
+     student wants to attempt the paper, not print it for someone else.
+   - No class/section/roster concepts anywhere. One person, their own material.
 2. **Do they sit the exam in-app?** Recommend shipping export-first, sit-mode second.
 3. `--trace` at `#B8E62E` needs a contrast pass on paper white before it is final.
