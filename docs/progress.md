@@ -2823,12 +2823,8 @@ affordance is unusable by keyboard.
    it and both load globally, so whichever imported later silently won. Found while
    removing the click-open source panel the drag replaced — which was where paper's
    `.cite` came from, so deleting the dead code resolved the collision.
-2. **The whole app was being force-darkened.** `:root` declared no `color-scheme`, so a
-   browser in dark mode inverts the page at paint time: `body` computed the correct
-   `rgb(246,247,249)` and rendered as a dark slab. That inverts the surfaces every colour
-   here was chosen against and re-tints `--trace`, which is the one hue carrying the
-   product's central claim. Fixed with `color-scheme: light` on `:root`. A dark theme, if
-   ever wanted, is a designed palette — not an automatic inversion of this one.
+2. ~~**The whole app was being force-darkened.**~~ **RETRACTED 2026-09-04.** See the
+   correction below.
 
 ### Deliberately NOT claimed
 
@@ -2860,3 +2856,56 @@ before it meant anything.
 - `frontend/src/paper/Paper.tsx` — question and source are now the two faces of one card.
 - `frontend/src/styles/tokens.css` — `color-scheme: light`.
 - `tests/test_p7_chat_guard.py` — 11 tests.
+
+
+---
+
+## 2026-09-04 (correction) — the dark screen was my own layout bug
+
+**Retracts the second "defect found by running it" in the entry above.** That entry
+claimed a browser in dark mode was force-darkening the app at paint time, and credited
+`color-scheme: light` with fixing it. Both halves are false.
+
+### What was actually wrong
+
+`{screen === "chat" && <ChatScreen />}` was mounted inside `<header className="harness__bar">`,
+not inside `<main>`. The header is `background: var(--slate); color: #fff; display: flex`,
+so the entire Ask screen rendered inside the dark navigation bar — nav buttons pushed to
+one side, chat content to the other, the whole thing on slate. That is exactly the
+screenshot I read as "force-darkened".
+
+The cause was mine: the patch that wired the screen in matched `{screen === "paper" &&`
+with `count=1`, and the **first** occurrence in `App.tsx` is the filter label in the
+header, not the branch in `<main>`. The same `str.replace(..., 1)` failure mode that had
+already produced a wrong mutation target earlier the same day.
+
+### Why the wrong diagnosis survived
+
+After adding `color-scheme: light` I reloaded and screenshotted — and the reload landed on
+**Blueprint**, the default screen, which renders in `<main>` and was never dark. I read a
+light screenshot of a different screen as confirmation. The check that would have
+disproved it was navigating back to Ask, which I did not do.
+
+### The measurement
+
+```
+Ask screen, placement fixed, prefers-color-scheme: dark
+  color-scheme: light   -> body rgb(246,247,249), title rgb(22,24,29)
+  color-scheme: normal  -> body rgb(246,247,249), title rgb(22,24,29)
+  screenshots           -> identical paint
+```
+
+Computed styles alone would not have settled it — force-darkening happens at paint time
+and leaves computed values untouched — so the comparison is by screenshot.
+
+`color-scheme: light` is **kept**, relabelled in `tokens.css` as precautionary rather than
+corrective. It is defensible on its own terms (UA-painted form controls and scrollbars
+follow the OS otherwise) and some browsers do force-darken. It just did not fix anything
+observed here.
+
+### The rule this cost
+
+R2: *measure, do not reason about causes.* I had a plausible mechanism, a screenshot that
+matched it, and a fix that appeared to work — and the appearance came from changing two
+things at once and looking at the wrong one. R10's "change one variable at a time, and
+prove the rest is unchanged" is the other half of the same lesson.

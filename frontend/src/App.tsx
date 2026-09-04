@@ -77,8 +77,6 @@ export default function App() {
             Ask
           </button>
         </nav>
-        {screen === "chat" && <ChatScreen />}
-
         {screen === "paper" && paper && (
           <label className="harness__filter">
             <input
@@ -95,6 +93,8 @@ export default function App() {
         {screen === "upload" && (
           <UploadScreen onDone={() => setScreen("blueprint")} />
         )}
+
+        {screen === "chat" && <ChatScreen />}
 
         {screen === "blueprint" && (
           <BlueprintScreen
