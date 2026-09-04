@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ProvenanceCard } from "../provenance/ProvenanceCard";
+import { PaperActions } from "./PaperActions";
 import type { Paper as PaperDoc, PaperItem, PaperSection } from "./types";
 import "./paper.css";
 
@@ -43,6 +44,10 @@ export function Paper({ paper, fromMaterialOnly = false }: Props) {
 
   return (
     <article className="paper" aria-label={paper.title}>
+      {/* Above the title, in the grotesque: taking the paper away is a thing you
+          do WITH the exam, not part of it. Nothing inside `.paper` is chrome. */}
+      <PaperActions />
+
       <PaperHead paper={paper} />
 
       {short && (

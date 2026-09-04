@@ -298,3 +298,40 @@
     gap: var(--s-1);
   }
 }
+
+/* ---------- take-away actions ---------- */
+
+/* The tool speaking, on the paper's surface — so grotesque, small, and set above
+   the title rule where it cannot be mistaken for part of the exam. No --trace:
+   downloading is not provenance. */
+.acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-bottom: var(--s-5);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.acts__link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.acts__link:hover {
+  border-color: var(--rule-strong);
+}
+
+.acts__hint {
+  font-family: var(--face-evidence);
+  color: var(--graphite-light);
+}
