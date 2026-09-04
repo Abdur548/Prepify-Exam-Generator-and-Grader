@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BlueprintScreen } from "./plan/BlueprintScreen";
 import { UploadScreen } from "./upload/UploadScreen";
 import { ChatScreen } from "./chat/ChatScreen";
+import { DisclosureScreen } from "./system/DisclosureScreen";
 import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
 import type { Plan } from "./plan/types";
@@ -14,7 +15,12 @@ import "./harness.css";
  * Dev harness. Five screens: upload, the blueprint (with its free dry run), the
  * wait, the paper, and ask. All run against the real API rather than fixtures.
  */
-type Screen = "upload" | "blueprint" | "generating" | "paper" | "chat";
+type Screen = "upload" | "blueprint" | "disclosure" | "generating" | "paper" | "chat";
+
+// The gate lives in the server's process memory and resets on restart, so this is
+// a hint about what the server probably thinks — never the authority. A stale
+// `true` costs nothing: the stream answers 403 and routes straight back here.
+const ACCEPTED_KEY = "prepify.disclosure";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("blueprint");
@@ -22,6 +28,24 @@ export default function App() {
   const [paper, setPaper] = useState<PaperDoc | null>(null);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
   const [fromMaterialOnly, setFromMaterialOnly] = useState(false);
+  const [accepted, setAccepted] = useState(() => {
+    try {
+      return sessionStorage.getItem(ACCEPTED_KEY) === "yes";
+    } catch {
+      // Private windows and blocked site data both throw here. Not being able to
+      // remember is fine; it just means the gate is shown again.
+      return false;
+    }
+  });
+
+  const remember = useCallback(() => {
+    setAccepted(true);
+    try {
+      sessionStorage.setItem(ACCEPTED_KEY, "yes");
+    } catch {
+      /* see above */
+    }
+  }, []);
 
   useEffect(() => {
     if (screen !== "paper" || paper) return;
@@ -43,6 +67,18 @@ export default function App() {
   // and pressing Generate again is not: the second run blocks on the process lock
   // and then spends the quota over. The nav closes for the duration.
   const busy = screen === "generating";
+
+  // Every route into generation passes through here, so there is one place that
+  // decides whether the gate has been met rather than a check per entry point.
+  const startRun = useCallback(
+    (next: { blueprintId: string; plan: Plan }) => {
+      setRun(next);
+      setPaper(null);
+      setOutcome(null);
+      setScreen(accepted ? "generating" : "disclosure");
+    },
+    [accepted],
+  );
 
   return (
     <div>
@@ -98,12 +134,17 @@ export default function App() {
 
         {screen === "blueprint" && (
           <BlueprintScreen
-            onGenerate={(blueprintId, plan) => {
-              setRun({ blueprintId, plan });
-              setPaper(null);
-              setOutcome(null);
-              setScreen("generating");
+            onGenerate={(blueprintId, plan) => startRun({ blueprintId, plan })}
+          />
+        )}
+
+        {screen === "disclosure" && (
+          <DisclosureScreen
+            onAccepted={() => {
+              remember();
+              setScreen(run ? "generating" : "blueprint");
             }}
+            onBack={() => setScreen("blueprint")}
           />
         )}
 
@@ -113,6 +154,17 @@ export default function App() {
             plan={run.plan}
             onDone={handleDone}
             onBack={() => setScreen("blueprint")}
+            // The server restarted mid-session and forgot. Our remembered `true`
+            // was a guess; the 403 is the authority, so forget it and re-ask.
+            onNeedsDisclosure={() => {
+              setAccepted(false);
+              try {
+                sessionStorage.removeItem(ACCEPTED_KEY);
+              } catch {
+                /* nothing to forget */
+              }
+              setScreen("disclosure");
+            }}
           />
         )}
 

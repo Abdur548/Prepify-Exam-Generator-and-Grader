@@ -36,6 +36,8 @@ interface Props {
   plan: Plan;
   onDone: (paper: PaperDoc, outcome: RunOutcome) => void;
   onBack: () => void;
+  /** The server answered 403: the disclosure gate has not been met, or reset. */
+  onNeedsDisclosure?: () => void;
 }
 
 const STAGES: { id: StageId; label: string }[] = [
@@ -56,7 +58,14 @@ export function GeneratingScreen(props: Props) {
   return <Run key={attempt} {...props} onRetry={() => setAttempt((a) => a + 1)} />;
 }
 
-function Run({ blueprintId, plan, onDone, onBack, onRetry }: Props & { onRetry: () => void }) {
+function Run({
+  blueprintId,
+  plan,
+  onDone,
+  onBack,
+  onRetry,
+  onNeedsDisclosure,
+}: Props & { onRetry: () => void }) {
   const run = useGenerationRun(blueprintId, plan.title);
   const [handoffError, setHandoffError] = useState("");
 
@@ -102,6 +111,7 @@ function Run({ blueprintId, plan, onDone, onBack, onRetry }: Props & { onRetry: 
           hint={handoffError ? "" : run.errorHint}
           onRetry={onRetry}
           onBack={onBack}
+          onNeedsDisclosure={onNeedsDisclosure}
         />
       ) : (
         <>
@@ -242,12 +252,14 @@ function Failure({
   hint,
   onRetry,
   onBack,
+  onNeedsDisclosure,
 }: {
   phase: string;
   message: string;
   hint: string;
   onRetry: () => void;
   onBack: () => void;
+  onNeedsDisclosure?: () => void;
 }) {
   const disclosure = phase === "needs_disclosure";
   return (
@@ -267,7 +279,19 @@ function Failure({
             "The paper was not handed over. Check the Paper tab before generating again."}
       </p>
       <div className="gen__failacts">
-        {!disclosure && (
+        {disclosure ? (
+          // A way through, not just an explanation. This used to be a dead end:
+          // the screen named the gate correctly and offered nothing but "back".
+          onNeedsDisclosure && (
+            <button
+              type="button"
+              className="gen__btn gen__btn--go"
+              onClick={onNeedsDisclosure}
+            >
+              Read it now
+            </button>
+          )
+        ) : (
           <button type="button" className="gen__btn gen__btn--go" onClick={onRetry}>
             Try again
           </button>

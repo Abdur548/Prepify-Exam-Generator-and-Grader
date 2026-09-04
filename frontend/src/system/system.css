@@ -78,3 +78,96 @@
 .blocked__btn:hover {
   border-color: var(--graphite);
 }
+
+/* ---------- the disclosure gate ---------- */
+
+/* Set on paper, not in the app chrome. It is a statement about the papers, and
+   it is the last thing read before the first one is made. */
+.disc {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+}
+
+.disc__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.disc__lead {
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-sm);
+  line-height: 1.7;
+  color: var(--graphite);
+}
+
+.disc__points {
+  margin: var(--s-5) 0 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: var(--s-4);
+  font-size: var(--t-sm);
+  line-height: 1.7;
+}
+
+.disc__points strong {
+  color: var(--ink);
+}
+
+.disc__coda {
+  margin: var(--s-5) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.disc__error {
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-sm);
+  color: var(--stop);
+}
+
+.disc__acts {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-6);
+}
+
+.disc__btn {
+  padding: var(--s-3) var(--s-5);
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.disc__btn--go {
+  background: var(--slate);
+  color: #fff;
+  border-color: var(--slate);
+  font-weight: 600;
+}
+
+.disc__btn--go:hover:not(:disabled) {
+  background: var(--slate-soft);
+}
+
+.disc__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.disc__note {
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
