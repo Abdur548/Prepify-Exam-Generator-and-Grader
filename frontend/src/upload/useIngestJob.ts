@@ -39,6 +39,7 @@ export interface IngestJob {
   dismiss: () => void;
 }
 
+// `waiting` is deliberately not terminal: the job is alive and will start.
 const TERMINAL = new Set(["idle", "done", "failed"]);
 
 export function useIngestJob(): IngestJob {

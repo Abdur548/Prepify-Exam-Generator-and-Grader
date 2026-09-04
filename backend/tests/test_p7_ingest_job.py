@@ -637,3 +637,80 @@ class TestUploadsAreCapped:
     def test_the_blocking_route_is_capped_too(self, client) -> None:
         resp = client.post("/api/ingest", files=[_upload("big.pdf", b"x" * 5000)])
         assert resp.status_code == 413
+
+
+class TestQueuedIngestSaysSo:
+    """An ingest behind a chat request or a generation used to report `running`
+    with no stage — a climbing clock over three pending stages, indistinguishable
+    from a hang. Chat can hold that lock for ~40 s on a cold model load.
+
+    The exam stream already announced its wait; the job did not."""
+
+    def test_a_queued_job_reports_waiting_and_names_the_holder(self, client) -> None:
+        import coursegen.app.main as main
+
+        started = threading.Event()
+
+        def watched(source_dir, data_dir=None, on_event=None):
+            started.set()
+            return []
+
+        main._PIPELINE_LOCK.acquire()
+        main._pipeline_holder = "answering a question"
+        try:
+            with patch("coursegen.ingest.coursemap.ingest", side_effect=watched):
+                client.post("/api/ingest/start", files=[_upload("a.pdf")])
+
+                deadline = time.monotonic() + 5
+                seen = None
+                while time.monotonic() < deadline:
+                    seen = client.get("/api/ingest/status").json()
+                    if seen["status"] == "waiting":
+                        break
+                    time.sleep(0.02)
+
+                assert seen["status"] == "waiting", seen
+                assert seen["waiting_for"] == "answering a question"
+                assert not started.is_set(), "work began while the lock was held"
+        finally:
+            main._pipeline_holder = ""
+            main._PIPELINE_LOCK.release()
+
+        assert started.wait(timeout=5), "the job never started after the lock freed"
+        _settle(client)
+
+    def test_a_waiting_job_still_blocks_a_second_upload(self, client) -> None:
+        """`waiting` is alive. Treated as terminal it would let a second upload
+        start and overwrite the first one's course map."""
+        import coursegen.app.main as main
+
+        main._PIPELINE_LOCK.acquire()
+        try:
+            with patch("coursegen.ingest.coursemap.ingest", return_value=[]):
+                client.post("/api/ingest/start", files=[_upload("a.pdf")])
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if client.get("/api/ingest/status").json()["status"] == "waiting":
+                        break
+                    time.sleep(0.02)
+
+                second = client.post("/api/ingest/start", files=[_upload("b.pdf")])
+                assert second.status_code == 409
+        finally:
+            main._PIPELINE_LOCK.release()
+        _settle(client)
+
+    def test_an_uncontended_ingest_never_reports_waiting(self, client) -> None:
+        """A "waiting" banner on every run would train the student to ignore it."""
+        seen: list[str] = []
+
+        def record(source_dir, data_dir=None, on_event=None):
+            seen.append(client.get("/api/ingest/status").json()["status"])
+            return []
+
+        with patch("coursegen.ingest.coursemap.ingest", side_effect=record):
+            client.post("/api/ingest/start", files=[_upload("a.pdf")])
+            final = _settle(client)
+
+        assert seen == ["running"], seen
+        assert final["waiting_for"] is None

@@ -12,7 +12,19 @@
  * reloaded page can go and read. That is the whole reason for the difference.
  */
 
-export type IngestStatus = "idle" | "queued" | "running" | "done" | "failed";
+/**
+ * `waiting` means the job exists but is queued behind a chat request or a
+ * generation — they all take one process-wide lock because Qdrant's file lock
+ * admits one writer. Before it existed the job reported `running` with no stage,
+ * which on screen is indistinguishable from a hang.
+ */
+export type IngestStatus =
+  | "idle"
+  | "queued"
+  | "waiting"
+  | "running"
+  | "done"
+  | "failed";
 
 /** `reading` and `mapping` take seconds; `indexing` takes the ten minutes. */
 export type IngestStage = "reading" | "mapping" | "indexing";
@@ -38,6 +50,8 @@ export interface IngestState {
   /** Chunks to embed — the only number that sizes the long wait. */
   passages: number | null;
   nodes_ingested: number | null;
+  /** What it is queued behind, while `status` is `waiting`. */
+  waiting_for: string | null;
   started_at: number | null;
   finished_at: number | null;
   error: string | null;

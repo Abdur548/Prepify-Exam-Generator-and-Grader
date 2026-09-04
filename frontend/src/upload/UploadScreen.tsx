@@ -50,7 +50,9 @@ export function UploadScreen({ onDone }: Props) {
   // the embedder, and `memory` is what decides whether the embedder can run.
   const stopped = blockers(preflight.checks, "ingest");
   const busy =
-    job.state?.status === "queued" || job.state?.status === "running";
+    job.state?.status === "queued" ||
+    job.state?.status === "waiting" ||
+    job.state?.status === "running";
 
   return (
     <div className="up">
@@ -187,6 +189,16 @@ function Running({ state }: { state: IngestState }) {
         <h2 className="run__title">Indexing your material</h2>
         <span className="run__clock">{formatElapsed(state.elapsed_seconds)}</span>
       </header>
+
+      {/* Queued, not started. Without this the three stages sit pending under a
+          climbing clock with nothing to say why — the same silence the exam
+          stream's `waiting` event was added to break. */}
+      {state.status === "waiting" && (
+        <p className="run__queued">
+          Waiting for the server to finish {state.waiting_for ?? "another job"}.
+          Your upload starts as soon as it does.
+        </p>
+      )}
 
       <ol className="run__stages">
         {STAGES.map((s, i) => (

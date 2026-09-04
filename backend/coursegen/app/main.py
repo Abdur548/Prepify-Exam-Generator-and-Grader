@@ -271,6 +271,7 @@ async def _save_uploads(files: list[UploadFile], dest_dir: Path) -> list[str]:
 def _ingest_under_lock(
     source_dir: Path,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    on_wait: Callable[[str], None] | None = None,
 ) -> list[Any]:
     """Ingest, serialised against generation.
 
@@ -282,8 +283,27 @@ def _ingest_under_lock(
     """
     from coursegen.ingest.coursemap import ingest
 
-    with _hold_pipeline("indexing your uploads"):
+    global _pipeline_holder
+
+    # Probed before blocking, so the wait can be REPORTED. Taking the lock
+    # straight away left the job announcing `running` with no stage while it sat
+    # behind a chat request or a generation — a climbing clock, three pending
+    # stages, and nothing to distinguish that from a hang. Chat can hold this for
+    # ~40 s on a cold model load.
+    if not _PIPELINE_LOCK.acquire(blocking=False):
+        if on_wait is not None:
+            try:
+                on_wait(_pipeline_holder or "another job")
+            except Exception:  # noqa: BLE001 - telemetry never fails the run
+                pass
+        _PIPELINE_LOCK.acquire()
+
+    _pipeline_holder = "indexing your uploads"
+    try:
         return ingest(source_dir, on_event=on_event)
+    finally:
+        _pipeline_holder = ""
+        _PIPELINE_LOCK.release()
 
 
 @app.post("/api/ingest")
@@ -328,6 +348,8 @@ _INGEST_STATE_LOCK = threading.Lock()
 _IDLE_INGEST: dict[str, Any] = {
     "status": "idle",
     "stage": None,
+    # What the run is queued behind, while `status` is "waiting". None otherwise.
+    "waiting_for": None,
     "files": [],
     "topics": None,
     "passages": None,
@@ -384,7 +406,13 @@ def _ingest_job(source_dir: Path, names: list[str]) -> None:
     """
     try:
         _update_ingest(status="running")
-        nodes = _ingest_under_lock(source_dir, on_event=_apply_ingest_event)
+        nodes = _ingest_under_lock(
+            source_dir,
+            on_event=_apply_ingest_event,
+            on_wait=lambda holder: _update_ingest(
+                status="waiting", waiting_for=holder
+            ),
+        )
         outcome: dict[str, Any] = {
             "status": "done",
             "nodes_ingested": len(nodes),
@@ -410,7 +438,10 @@ def _ingest_job(source_dir: Path, names: list[str]) -> None:
 async def ingest_start(files: list[UploadFile]) -> dict[str, Any]:
     """Begin an ingest and return immediately. Poll `/api/ingest/status`."""
     with _INGEST_STATE_LOCK:
-        if _ingest_state["status"] in ("queued", "running"):
+        # `waiting` is alive, not finished. Omitted here, a job queued behind a
+        # chat request would let a second upload start and overwrite the course
+        # map the first one is about to write.
+        if _ingest_state["status"] in ("queued", "waiting", "running"):
             raise HTTPException(
                 status_code=409,
                 detail="An upload is already being indexed. Wait for it to finish.",

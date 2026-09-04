@@ -330,3 +330,14 @@
 .done__btn--go:hover {
   background: var(--slate-soft);
 }
+
+/* Queued behind another job. Plain, not amber: nothing is wrong, and the run
+   will start on its own. */
+.run__queued {
+  margin: var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--app-bg);
+  border-radius: var(--radius);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+}
