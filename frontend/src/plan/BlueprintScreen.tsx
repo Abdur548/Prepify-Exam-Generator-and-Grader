@@ -3,6 +3,7 @@ import type { Plan } from "./types";
 import { Blocked, Unreachable } from "../system/Blocked";
 import { blockers, usePreflight } from "../system/usePreflight";
 import { useBlueprints } from "./useBlueprints";
+import { readWarnings } from "./warnings";
 import "./plan.css";
 
 /**
@@ -252,13 +253,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
                   </div>
                 </dl>
 
-                {plan.summary.warnings.length > 0 && (
-                  <ul className="panel__warnings">
-                    {plan.summary.warnings.slice(0, 3).map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                  </ul>
-                )}
+                <Advisories warnings={plan.summary.warnings} />
 
                 {/* The gate, not a disabled button beside an explanation.
                     `memory` failing means the OS kills the process on load -
@@ -337,6 +332,52 @@ function Meter({
           ? `${short} marks short — your notes do not cover enough for the full paper.`
           : "Your notes cover the whole paper."}
       </p>
+    </div>
+  );
+}
+
+
+/**
+ * What the solver wants the student to know, and — behind a disclosure — exactly
+ * what it said.
+ *
+ * The raw strings used to be printed three at a time, and on a real 32-question
+ * paper that was three near-identical lines of `span-exhausted; falling through
+ * to node '006d27…'`. `slice(0, 3)` also meant a genuinely important warning
+ * ("Section C was left empty") could be pushed off the panel by two repetitions
+ * of a routine one.
+ *
+ * Ordered so anything that emptied a section leads, since that is the only kind
+ * a student can do something about before pressing Generate.
+ */
+function Advisories({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null;
+  const { advisories } = readWarnings(warnings);
+  if (advisories.length === 0) return null;
+
+  return (
+    <div className="advisories">
+      <ul className="advisories__list">
+        {advisories.map((a, i) => (
+          <li key={i} className={`advisory advisory--${a.tone}`}>
+            {a.text}
+          </li>
+        ))}
+      </ul>
+
+      {/* §1D: a warning is never deleted for being noisy. Every original is
+          here, verbatim, one click away. */}
+      <details className="advisories__raw">
+        <summary>
+          What the solver reported ({warnings.length} line
+          {warnings.length === 1 ? "" : "s"})
+        </summary>
+        <ul>
+          {warnings.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }

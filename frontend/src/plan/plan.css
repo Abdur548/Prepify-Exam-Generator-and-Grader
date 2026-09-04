@@ -352,3 +352,57 @@
   font-size: var(--t-xs);
   color: var(--graphite-light);
 }
+
+/* ---------- advisories ---------- */
+
+.advisories {
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+}
+
+.advisories__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+}
+
+.advisory {
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--rule-strong);
+  font-size: var(--t-xs);
+  line-height: 1.6;
+  color: var(--graphite);
+}
+
+/* Amber only for the kind a student can act on before generating. A routine
+   fall-through is a fact about the paper, not a fault, and colouring it as one
+   trains them to ignore the colour. */
+.advisory--warn {
+  border-left-color: var(--warn);
+  color: var(--ink);
+}
+
+.advisories__raw {
+  margin-top: var(--s-3);
+  font-size: var(--t-xs);
+}
+
+.advisories__raw summary {
+  cursor: pointer;
+  color: var(--graphite-light);
+}
+
+.advisories__raw ul {
+  margin: var(--s-2) 0 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: var(--s-2);
+  font-family: var(--face-evidence);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--graphite-light);
+  overflow-wrap: anywhere;
+}
