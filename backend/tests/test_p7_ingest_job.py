@@ -555,3 +555,85 @@ class TestCollidingNames:
             state = _settle(client)
 
         assert len(state["files"]) == 3, state["files"]
+
+
+class TestUploadsAreCapped:
+    """The upload path could kill the process it runs in.
+
+    `await f.read()` put every file in memory before anything checked it, and
+    `_check_file_size` does not run until `parse_file` — long after the bytes are
+    resident and on disk. This process dies at ~4 GB of committable memory with an
+    access violation no handler can catch, which is the exact failure
+    `preflight`'s `memory` check exists to warn about. An unbounded upload could
+    therefore kill the server in the one way the rest of the system is arranged to
+    prevent.
+
+    Limits are shrunk here rather than sending real megabytes: the guard reads
+    config at call time, so a small ceiling exercises the same branch.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _small_limits(self, monkeypatch: pytest.MonkeyPatch):
+        from coursegen import config
+
+        monkeypatch.setattr(config, "MAX_FILE_SIZE_BYTES", 1000)
+        monkeypatch.setattr(config, "MAX_UPLOAD_TOTAL_BYTES", 2500)
+        monkeypatch.setattr(config, "UPLOAD_CHUNK_BYTES", 256)
+
+    def test_a_file_over_the_per_file_limit_is_refused(self, client) -> None:
+        resp = client.post(
+            "/api/ingest/start", files=[_upload("big.pdf", b"x" * 5000)]
+        )
+        assert resp.status_code == 413
+        assert "single file" in resp.json()["detail"]
+
+    def test_many_small_files_over_the_total_limit_are_refused(self, client) -> None:
+        """The per-file limit alone bounds nothing: N files under it are N times
+        the memory."""
+        resp = client.post("/api/ingest/start", files=[
+            _upload(f"f{i}.pdf", b"x" * 900) for i in range(6)
+        ])
+        assert resp.status_code == 413
+        assert "total limit" in resp.json()["detail"]
+
+    def test_a_refused_upload_leaves_nothing_behind(self, client) -> None:
+        """A rejected 400 MB request that left its partial writes on disk would
+        turn a refusal into a slower way to fill the disk."""
+        import tempfile as _tf
+
+        before = set(Path(_tf.gettempdir()).glob("prepify-ingest-*"))
+        client.post("/api/ingest/start", files=[_upload("big.pdf", b"x" * 5000)])
+        after = set(Path(_tf.gettempdir()).glob("prepify-ingest-*"))
+        assert after == before, f"leftover upload dirs: {after - before}"
+
+    def test_a_refused_upload_does_not_strand_the_job_state(self, client) -> None:
+        """Reserved on entry and never released, the state would sit in `queued`
+        and 409 every later upload — one oversized file locking out the feature."""
+        client.post("/api/ingest/start", files=[_upload("big.pdf", b"x" * 5000)])
+        assert client.get("/api/ingest/status").json()["status"] == "idle"
+
+        with patch("coursegen.ingest.coursemap.ingest", return_value=[]):
+            ok = client.post("/api/ingest/start", files=[_upload("a.pdf", b"tiny")])
+            assert ok.status_code == 200
+            _settle(client)
+
+    def test_an_upload_within_the_limits_still_works(self, client) -> None:
+        seen: dict[str, Any] = {}
+
+        def fake(source_dir, data_dir=None, on_event=None):
+            seen["sizes"] = sorted(p.stat().st_size for p in Path(source_dir).iterdir())
+            return []
+
+        with patch("coursegen.ingest.coursemap.ingest", side_effect=fake):
+            resp = client.post("/api/ingest/start", files=[
+                _upload("a.pdf", b"x" * 900), _upload("b.pdf", b"y" * 900),
+            ])
+            assert resp.status_code == 200
+            _settle(client)
+
+        # Written whole and correctly, not truncated by the chunking.
+        assert seen["sizes"] == [900, 900]
+
+    def test_the_blocking_route_is_capped_too(self, client) -> None:
+        resp = client.post("/api/ingest", files=[_upload("big.pdf", b"x" * 5000)])
+        assert resp.status_code == 413

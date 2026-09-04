@@ -228,10 +228,42 @@ async def _save_uploads(files: list[UploadFile], dest_dir: Path) -> list[str]:
     """
     names: list[str] = []
     taken: set[str] = set()
+    total = 0
+
     for f in files:
         name = _unique_name(_safe_upload_name(f.filename), taken)
         taken.add(name)
-        (dest_dir / name).write_bytes(await f.read())
+        written = 0
+
+        # Streamed and counted, rather than `await f.read()`.
+        #
+        # Reading whole files put the entire upload in memory before anything
+        # checked it, and `_check_file_size` does not run until `parse_file` —
+        # long after the bytes are resident AND on disk. This process is killed
+        # by the OS at ~4 GB of committable memory with an access violation no
+        # handler can catch; `preflight`'s `memory` check exists for precisely
+        # that failure. An unbounded upload could therefore kill the server in
+        # the one way the rest of the system is arranged to prevent.
+        with (dest_dir / name).open("wb") as out:
+            while chunk := await f.read(config.UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                total += len(chunk)
+                if written > config.MAX_FILE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{name} is larger than the "
+                               f"{config.MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB "
+                               f"limit for a single file.",
+                    )
+                if total > config.MAX_UPLOAD_TOTAL_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"That upload is over the "
+                               f"{config.MAX_UPLOAD_TOTAL_BYTES // (1024 * 1024)} MB "
+                               f"total limit. Send fewer files at a time.",
+                    )
+                out.write(chunk)
+
         names.append(name)
     return names
 

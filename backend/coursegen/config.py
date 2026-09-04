@@ -119,6 +119,21 @@ MAX_DECOMPRESSED_SIZE_BYTES: int = 500 * 1024 * 1024  # 500 MB
 MAX_PAGES: int = 2_000
 PARSE_TIMEOUT_SECONDS: int = 60
 
+# Ceiling on ONE upload request, across all its files.
+#
+# MAX_FILE_SIZE_BYTES is enforced by the parser, which runs long after the bytes
+# have been read and written — so on its own it bounds nothing about the upload
+# itself. Ten files at the per-file limit is 1 GB, and this process dies at ~4 GB
+# of committable memory in a way no handler can catch (see app/preflight.py's
+# `memory` check, which exists for exactly that failure). A cap enforced while
+# reading is what stops the upload path killing the server the preflight gate is
+# built to protect.
+#
+# 400 MB is four full-size decks, comfortably above the 14-deck real corpus
+# (~60 MB) and far below the headroom the embedder needs.
+MAX_UPLOAD_TOTAL_BYTES: int = 400 * 1024 * 1024     # 400 MB
+UPLOAD_CHUNK_BYTES: int = 1024 * 1024               # 1 MB
+
 # ---------------------------------------------------------------------------
 # Embedding
 # ---------------------------------------------------------------------------
