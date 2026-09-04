@@ -21,6 +21,22 @@ import type { BatchEvent, ResultEvent, RunEvent, StageId } from "./types";
  * double the wait. The guard makes the run start exactly once per mount.
  */
 
+/**
+ * How long the stream may say nothing before it is treated as dead.
+ *
+ * A stream that CLOSES without a terminal event has been handled since
+ * 2026-09-03. A stream that stays open and goes silent was not: the stage rail
+ * stayed live and the clock kept climbing with nothing ever resolving, and a
+ * student had no way to tell "still writing questions" from "gone".
+ *
+ * Sized off the longest legitimate gap, which is the model load: measured at
+ * 24.5 s cold, and the pipeline says nothing between `loading` start and its
+ * completion. 120 s is roughly five times that, so a slow machine is never cut
+ * off — the protocol has no heartbeat, so this has to be generous or it becomes
+ * a worse bug than the one it fixes.
+ */
+const SILENCE_LIMIT_MS = 120_000;
+
 export type RunPhase =
   | "connecting"
   | "running"
@@ -98,13 +114,38 @@ export function useGenerationRun(blueprintId: string, title: string): RunState {
       }
     }, 1000);
 
-    const apply = (e: RunEvent) =>
+    // Reset by every event, so the deadline measures SILENCE rather than total
+    // run time — a long generation is fine; a quiet one is not.
+    let silence: number | undefined;
+    const giveUp = () => {
+      if (!live.current) return;
+      setState((s) =>
+        s.phase === "done" || s.phase === "error"
+          ? s
+          : {
+              ...s,
+              phase: "error",
+              error: "The server stopped sending updates part-way through.",
+              errorHint:
+                "It may still be working. Check the paper before generating again — a second run costs the same as the first.",
+            },
+      );
+    };
+    const armSilence = () => {
+      window.clearTimeout(silence);
+      silence = window.setTimeout(giveUp, SILENCE_LIMIT_MS);
+    };
+
+    const apply = (e: RunEvent) => {
+      armSilence();
       setState((s) => (live.current ? reduce(s, e) : s));
+    };
 
     if (started.current) {
       return () => {
         live.current = false;
         window.clearInterval(ticker);
+        window.clearTimeout(silence);
       };
     }
     started.current = true;
@@ -135,7 +176,9 @@ export function useGenerationRun(blueprintId: string, title: string): RunState {
         if (!res.body) throw new Error("This browser cannot read a streamed response.");
 
         setState((s) => (live.current ? { ...s, phase: "running" } : s));
+        armSilence();
         await readNdjson(res.body, apply);
+        window.clearTimeout(silence);
 
         // The stream ended. If it ended without `result` or `error`, the server
         // went away mid-run — the documented case is the OS killing the process
@@ -173,6 +216,7 @@ export function useGenerationRun(blueprintId: string, title: string): RunState {
     return () => {
       live.current = false;
       window.clearInterval(ticker);
+      window.clearTimeout(silence);
     };
   }, [blueprintId, title]);
 
