@@ -714,3 +714,33 @@ class TestQueuedIngestSaysSo:
 
         assert seen == ["running"], seen
         assert final["waiting_for"] is None
+
+
+class TestLimitsAreServed:
+    """`UploadScreen` hardcoded `100 * 1024 * 1024` and the string "100 MB" —
+    three copies of one config value, two of them in the client. Change the config
+    and the client rejects files the server would take, or accepts files it will
+    refuse, showing a wrong number either way."""
+
+    def test_the_limits_come_from_config(self, client, monkeypatch) -> None:
+        from coursegen import config
+
+        monkeypatch.setattr(config, "MAX_FILE_SIZE_BYTES", 12345)
+        monkeypatch.setattr(config, "MAX_UPLOAD_TOTAL_BYTES", 67890)
+        body = client.get("/api/limits").json()
+
+        assert body["max_file_bytes"] == 12345
+        assert body["max_upload_bytes"] == 67890
+
+    def test_extensions_come_from_the_parser_not_a_second_literal(self, client) -> None:
+        """A format added to the parser must appear here without anyone
+        remembering to update a list."""
+        from coursegen.ingest.parse import _SCANNED_SUFFIXES
+
+        served = set(client.get("/api/limits").json()["extensions"])
+        assert served == _SCANNED_SUFFIXES - {".ppt"}
+
+    def test_legacy_ppt_is_not_offered(self, client) -> None:
+        """`.ppt` is scanned so it can be rejected by name with a remedy, but it
+        can never be parsed. Offering it invites an upload that always fails."""
+        assert ".ppt" not in client.get("/api/limits").json()["extensions"]

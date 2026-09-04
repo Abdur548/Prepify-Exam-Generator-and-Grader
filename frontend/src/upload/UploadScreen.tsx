@@ -3,6 +3,7 @@ import type { IngestFile, IngestStage, IngestState } from "./types";
 import { useIngestJob } from "./useIngestJob";
 import { Blocked, Unreachable } from "../system/Blocked";
 import { blockers, usePreflight } from "../system/usePreflight";
+import { mb, useLimits, type Limits } from "./useLimits";
 import "./upload.css";
 
 /**
@@ -29,10 +30,6 @@ import "./upload.css";
  * rather than going missing from every paper generated later.
  */
 
-const ACCEPT = ".pdf,.pptx,.docx";
-const ALLOWED = [".pdf", ".pptx", ".docx"];
-const MAX_BYTES = 100 * 1024 * 1024; // config.MAX_FILE_SIZE_BYTES
-
 const STAGES: { id: IngestStage; label: string }[] = [
   { id: "reading", label: "Reading your files" },
   { id: "mapping", label: "Finding the topics" },
@@ -49,6 +46,7 @@ export function UploadScreen({ onDone }: Props) {
   // Ingest makes no LLM call, so a missing API key does not stop it. It does need
   // the embedder, and `memory` is what decides whether the embedder can run.
   const stopped = blockers(preflight.checks, "ingest");
+  const limits = useLimits();
   const busy =
     job.state?.status === "queued" ||
     job.state?.status === "waiting" ||
@@ -79,7 +77,7 @@ export function UploadScreen({ onDone }: Props) {
               onRetry={preflight.refresh}
             />
           ) : (
-            <Dropzone onFiles={job.start} error={job.error} />
+            <Dropzone onFiles={job.start} error={job.error} limits={limits} />
           )}
           {job.state && job.state.status !== "idle" && (
             <Finished state={job.state} onDismiss={job.dismiss} onDone={onDone} />
@@ -95,9 +93,11 @@ export function UploadScreen({ onDone }: Props) {
 function Dropzone({
   onFiles,
   error,
+  limits,
 }: {
   onFiles: (files: File[]) => void;
   error: string;
+  limits: Limits;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -110,11 +110,23 @@ function Dropzone({
     if (!list) return;
     const ok: File[] = [];
     const bad: string[] = [];
+    let total = 0;
     for (const f of Array.from(list)) {
       const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
-      if (!ALLOWED.includes(ext)) bad.push(`${f.name} — we can't read ${ext} files`);
-      else if (f.size > MAX_BYTES) bad.push(`${f.name} — over the 100 MB limit`);
-      else ok.push(f);
+      if (!limits.extensions.includes(ext)) {
+        bad.push(`${f.name} — we can't read ${ext} files`);
+      } else if (f.size > limits.maxFileBytes) {
+        bad.push(`${f.name} — over the ${mb(limits.maxFileBytes)} limit`);
+      } else if (total + f.size > limits.maxUploadBytes) {
+        // The server enforces this too; catching it here saves uploading the
+        // bytes only to have them refused at the far end.
+        bad.push(
+          `${f.name} — this batch is over the ${mb(limits.maxUploadBytes)} total`,
+        );
+      } else {
+        total += f.size;
+        ok.push(f);
+      }
     }
     setRejected(bad);
     if (ok.length) onFiles(ok);
@@ -139,7 +151,7 @@ function Dropzone({
           ref={input}
           type="file"
           multiple
-          accept={ACCEPT}
+          accept={limits.extensions.join(",")}
           className="drop__input"
           onChange={(e) => {
             accept(e.target.files);
@@ -156,7 +168,10 @@ function Dropzone({
         </button>
         {/* Scholarly's pattern: the limits sit in the zone, not behind a tooltip
             that is read after the failure. */}
-        <p className="drop__limits">PDF · PowerPoint · Word — up to 100 MB each</p>
+        <p className="drop__limits">
+          PDF · PowerPoint · Word — up to {mb(limits.maxFileBytes)} each,{" "}
+          {mb(limits.maxUploadBytes)} in one go
+        </p>
       </div>
 
       <p className="up__warn">

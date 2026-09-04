@@ -151,6 +151,30 @@ def list_blueprints() -> list[str]:
     return sorted(p.stem for p in _BLUEPRINT_DIR.glob("*.json"))
 
 
+@app.get("/api/limits")
+def limits() -> dict[str, Any]:
+    """What the server will accept, so the client can stop asking it to guess.
+
+    `UploadScreen` hardcoded `100 * 1024 * 1024` with a comment pointing here, and
+    hardcoded "100 MB" again in its rejection message — three copies of one
+    number, two of them in the client. Change the config and the client either
+    rejects files the server would take or accepts files it will refuse, and the
+    message it shows is wrong either way.
+
+    Extensions come from the parser's own scanned-suffix set rather than a second
+    literal, so a format added there appears here without anyone remembering to.
+    `.ppt` is scanned but never parseable, and is excluded deliberately: offering
+    it would invite an upload that always fails.
+    """
+    from coursegen.ingest.parse import _SCANNED_SUFFIXES
+
+    return {
+        "max_file_bytes": config.MAX_FILE_SIZE_BYTES,
+        "max_upload_bytes": config.MAX_UPLOAD_TOTAL_BYTES,
+        "extensions": sorted(_SCANNED_SUFFIXES - {".ppt"}),
+    }
+
+
 @app.get("/api/topics")
 def list_topics(limit: int = 6) -> list[str]:
     """The densest topics in the student's own material, by name.
