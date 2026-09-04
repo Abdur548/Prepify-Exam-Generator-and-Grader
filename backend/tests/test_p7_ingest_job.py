@@ -485,3 +485,73 @@ class TestParseReportsEachFile:
 
         docs = parse_directory(tmp_path, on_file=boom)
         assert len(docs) == 1
+
+
+class TestCollidingNames:
+    """Two files that differ only by folder used to become one file, silently.
+
+    Silently is the point: the upload screen listed every row it was sent, and
+    `_apply_ingest_event` keys rows by name — so they merged back into one as
+    parsing started and the student watched their file list shrink with nothing
+    saying why.
+    """
+
+    @pytest.mark.parametrize("names,expected", [
+        (["notes.pdf", "notes.pdf"], ["notes.pdf", "notes-2.pdf"]),
+        (["a/n.pdf", "b/n.pdf", "c/n.pdf"], ["n.pdf", "n-2.pdf", "n-3.pdf"]),
+        (["x.pdf", "y.pdf"], ["x.pdf", "y.pdf"]),
+        # Already-suffixed names must not collide with a generated suffix.
+        (["n.pdf", "n-2.pdf", "n.pdf"], ["n.pdf", "n-2.pdf", "n-3.pdf"]),
+        # No extension at all.
+        (["README", "README"], ["README", "README-2"]),
+    ])
+    def test_names_are_made_unique(self, names, expected) -> None:
+        from coursegen.app.main import _safe_upload_name, _unique_name
+
+        taken: set[str] = set()
+        out = []
+        for n in names:
+            picked = _unique_name(_safe_upload_name(n), taken)
+            taken.add(picked)
+            out.append(picked)
+        assert out == expected
+
+    def test_the_suffix_goes_before_the_extension(self) -> None:
+        """`parse_file` dispatches on `path.suffix`. `notes.pdf-2` is not a PDF to
+        it, so a deduplicated file would be skipped as an unsupported type — a
+        different silent loss in place of the one being fixed."""
+        from pathlib import Path as _P
+
+        from coursegen.app.main import _unique_name
+
+        assert _P(_unique_name("notes.pdf", {"notes.pdf"})).suffix == ".pdf"
+
+    def test_every_uploaded_file_reaches_disk(self, client) -> None:
+        seen: dict[str, Any] = {}
+
+        def fake(source_dir, data_dir=None, on_event=None):
+            seen["files"] = sorted(p.name for p in Path(source_dir).iterdir())
+            return []
+
+        with patch("coursegen.ingest.coursemap.ingest", side_effect=fake):
+            resp = client.post("/api/ingest/start", files=[
+                _upload("notes.pdf", b"one"),
+                _upload("notes.pdf", b"two"),
+                _upload("notes.pdf", b"three"),
+            ])
+            _settle(client)
+
+        assert len(seen["files"]) == 3, seen["files"]
+        # And the client is told the names actually used, or its file list
+        # describes a directory that does not exist.
+        assert resp.json()["files"] == ["notes.pdf", "notes-2.pdf", "notes-3.pdf"]
+
+    def test_the_status_rows_do_not_merge(self, client) -> None:
+        """The visible symptom. Three rows in, three rows out."""
+        with patch("coursegen.ingest.coursemap.ingest", return_value=[]):
+            client.post("/api/ingest/start", files=[
+                _upload("notes.pdf"), _upload("notes.pdf"), _upload("notes.pdf"),
+            ])
+            state = _settle(client)
+
+        assert len(state["files"]) == 3, state["files"]

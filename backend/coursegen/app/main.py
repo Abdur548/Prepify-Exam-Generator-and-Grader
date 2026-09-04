@@ -193,10 +193,44 @@ def _safe_upload_name(raw: str | None) -> str:
     return name if name and name not in {".", ".."} else "upload"
 
 
+def _unique_name(name: str, taken: set[str]) -> str:
+    """`notes.pdf`, `notes-2.pdf`, `notes-3.pdf` — never the same file twice.
+
+    Reducing an upload to its basename (see `_safe_upload_name`) makes two files
+    that differ only by folder collide, and the collision was silent: each write
+    overwrote the last, so three decks became one indexed file.
+
+    Silent is the operative word. `_save_uploads` returned the duplicated list, so
+    the upload screen listed three rows — and `_apply_ingest_event` keys file rows
+    by name, so they merged back into one as parsing began. A student saw their
+    own file list shrink, with nothing saying anything had been dropped.
+
+    The suffix goes before the extension so the file still parses: `parse_file`
+    dispatches on `path.suffix`, and `notes.pdf-2` is not a PDF to it.
+    """
+    if name not in taken:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot:  # no extension at all
+        stem, ext = name, ""
+    n = 2
+    while f"{stem}-{n}{dot}{ext}" in taken:
+        n += 1
+    return f"{stem}-{n}{dot}{ext}"
+
+
 async def _save_uploads(files: list[UploadFile], dest_dir: Path) -> list[str]:
+    """Write the uploads and return the names they were actually saved under.
+
+    The returned list is what the client is shown, so it has to be the names on
+    disk rather than the names sent — otherwise the file list is a description of
+    a directory that does not exist.
+    """
     names: list[str] = []
+    taken: set[str] = set()
     for f in files:
-        name = _safe_upload_name(f.filename)
+        name = _unique_name(_safe_upload_name(f.filename), taken)
+        taken.add(name)
         (dest_dir / name).write_bytes(await f.read())
         names.append(name)
     return names
