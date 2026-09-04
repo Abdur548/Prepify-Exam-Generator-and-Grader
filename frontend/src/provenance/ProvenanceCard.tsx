@@ -108,6 +108,14 @@ export function ProvenanceCard({
       const dx = e.clientX - startX.current;
       const dy = e.clientY - startY.current;
 
+      // A non-finite delta would sail through every check below, because every
+      // comparison against NaN is false — the threshold would not stop it, the
+      // axis test would not stop it, and `drag` would be set to NaN, which is
+      // not null and so leaves the card permanently mid-gesture. Real browsers
+      // always send coordinates; this costs one comparison to make the failure
+      // impossible rather than merely unlikely.
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+
       if (drag === null) {
         // Still deciding. Below the threshold, do nothing at all — the browser
         // keeps handling it as a selection.
