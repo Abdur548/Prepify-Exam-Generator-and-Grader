@@ -727,7 +727,55 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
     history = [(h[0], h[1]) for h in request.history if len(h) == 2]
-    return _run_chat_query(request.query, history)
+
+    # Fail fast rather than queue. Chat reads Qdrant, ingest writes it, and Qdrant
+    # takes an exclusive file lock (S8) - so a question asked during an indexing
+    # run used to reach the lock and raise, which surfaced as a bare 500. Waiting
+    # would be no better: a chat request held open for the ten minutes an ingest
+    # takes is indistinguishable from a hang. Told what is happening, a student can
+    # come back; told nothing, they refresh and ask again.
+    global _pipeline_holder
+    if not _PIPELINE_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Busy {_pipeline_holder or 'with another job'}. "
+                   "Your material is not available for questions until it finishes.",
+        )
+    _pipeline_holder = "answering a question"
+    try:
+        return _run_chat_query(request.query, history)
+    except BudgetExceeded:
+        # A known limit, not a fault - the same distinction /api/exam draws. A 500
+        # here would tell a student their notes were broken when they had simply
+        # run out of quota for the day.
+        logger.warning("Chat degraded: quota limit reached")
+        return {
+            "answer": "You have reached today's request limit, so I can't answer "
+                      "this one. Your material is still indexed and questions will "
+                      "work again once the limit resets.",
+            "citations": [],
+            "from_material": False,
+            "status": "degraded",
+        }
+    except httpx.RequestError as exc:
+        logger.warning(f"Chat degraded: network error ({type(exc).__name__})")
+        return {
+            "answer": "I couldn't reach the model just now. Nothing is wrong with "
+                      "your material — try the question again.",
+            "citations": [],
+            "from_material": False,
+            "status": "degraded",
+        }
+    except Exception:
+        # R4: the traceback goes to the log, never to the client.
+        logger.exception("Unexpected chat error")
+        raise HTTPException(
+            status_code=500,
+            detail="That question could not be answered. Check the server logs.",
+        )
+    finally:
+        _pipeline_holder = ""
+        _PIPELINE_LOCK.release()
 
 
 def _run_chat_query(query: str, history: list[tuple[str, str]]) -> dict[str, Any]:

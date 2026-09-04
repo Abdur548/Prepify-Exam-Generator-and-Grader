@@ -172,6 +172,15 @@ For a **synthesis** item the right panel is honest instead: *"Not from your mate
 question asks you to build something new."* No trace colour. That is the affordance the
 backend has been asking for since the synthesis ratio first fired at 40%.
 
+**Built 2026-09-04, with two departures from this sketch:**
+
+- **No highlighted supporting line.** The diagram marks the one line in the slide that
+  backs the answer. Nothing in the system knows which line that is — `source_excerpt` is
+  the passage a question was written from, not a located claim — so the trace marks the
+  whole passage. Marking a line would be inventing evidence (R7).
+- **A button as well as the drag.** A drag-only affordance is unusable by keyboard. Both
+  drive the same state, so nothing is reachable one way and not the other.
+
 ---
 
 ## 5. Screens
@@ -259,9 +268,9 @@ complete and usable — the missing six are marked."*
 2. **Paper renderer** — serif, marks rail, sections, instructions. Everything else hangs off it.
 3. Blueprint form with live counters, two-pane against the paper.
 4. ~~Generating screen with real stages.~~ **Done** 2026-09-03 — needed a streaming endpoint first.
-5. Provenance drag (landing + in-app, one component).
+5. ~~Provenance drag (landing + in-app, one component).~~ **Done** 2026-09-04.
 6. ~~Upload with the long wait.~~ **Done** 2026-09-04 — needed ingest to become a job first.
-7. Chat with `from_material`.
+7. ~~Chat with `from_material`.~~ **Done** 2026-09-04.
 8. *Phase 2:* sit-the-exam mode.
 
 ---

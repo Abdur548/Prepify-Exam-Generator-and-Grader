@@ -1,0 +1,114 @@
+/* The drag-to-source card.
+ *
+ * The two faces are stacked, not side by side: the source occupies exactly the
+ * space the question vacates, so the paper's line rhythm never shifts under the
+ * gesture. `grid-area: 1/1` on both is what does that — a card that reflows while
+ * you drag it reads as broken however smooth the easing is.
+ */
+
+.prov {
+  display: grid;
+  position: relative;
+  touch-action: pan-y; /* keep vertical scrolling; claim only the horizontal drag */
+}
+
+.prov__face {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 200ms ease;
+}
+
+/* No easing while a finger is on it — the card must track the pointer exactly,
+   or the gesture feels like it is arguing with you. */
+.prov--dragging .prov__face {
+  transition: none;
+}
+
+.prov--dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* ---------- the source face ---------- */
+
+.prov__face--source {
+  align-self: start;
+}
+
+.src {
+  padding: var(--s-4);
+  background: var(--paper-edge);
+  border-left: 3px solid var(--trace);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.src__ref {
+  margin: 0 0 var(--s-2);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--trace-deep);
+}
+
+/* The passage the question was written from. Trace-washed as a whole and never
+   line-by-line: nothing in the system locates the sentence that backs the answer,
+   so marking one would be inventing evidence. */
+.src__text {
+  margin: 0;
+  padding: var(--s-3);
+  background: var(--trace-wash);
+  border-radius: 3px;
+  font-family: var(--face-paper);
+  font-size: var(--t-sm);
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.src__note {
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+/* A synthesis item. No trace, no rail, no warning colour — it is not a fault,
+   and the absence of the mark is exactly what says "not from your notes". */
+.src--synthesis {
+  border-left-color: var(--rule-strong);
+  background: #fff;
+}
+
+.src--synthesis .src__text {
+  background: none;
+  padding: 0;
+  color: var(--graphite);
+}
+
+/* ---------- the toggle ---------- */
+
+/* The keyboard path to the same state, and the discoverability hint for the
+   gesture — a drag nothing announces is a drag nobody finds. */
+.prov__toggle {
+  grid-area: 2 / 1;
+  justify-self: start;
+  margin-top: var(--s-3);
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--rule-strong);
+  cursor: pointer;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.prov__toggle:hover {
+  color: var(--ink);
+  border-bottom-color: var(--graphite);
+}
+
+.prov--open .prov__toggle {
+  color: var(--trace-deep);
+  border-bottom-color: var(--trace);
+}

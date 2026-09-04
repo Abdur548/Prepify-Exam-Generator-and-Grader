@@ -208,45 +208,23 @@
   font-family: var(--face-tool);
 }
 
-.cite {
+/* A synthesis question. No trace colour, no badge, no warning icon — the absence
+   of the highlight is the signal, and it cannot be misread as an error.
+ *
+ * Named `--none` but no longer a modifier of anything: the `.cite` chip it used to
+ * extend was superseded by the drag card (`provenance.css`). Standalone also
+ * resolves a real collision — `.cite` was declared here AND in chat.css, and both
+ * stylesheets load globally, so whichever imported later silently won. */
+.cite--none {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: 3px var(--s-2) 3px 3px;
-  background: none;
-  border: 1px solid var(--rule);
+  padding: 3px var(--s-3);
+  border: 1px dashed var(--rule);
   border-radius: 999px;
-  cursor: pointer;
-  font: inherit;
+  font-family: var(--face-tool);
   font-size: var(--t-xs);
-  color: var(--graphite);
-}
-
-.cite:hover {
-  border-color: var(--rule-strong);
-}
-
-/* The only saturated colour in the product, and it means exactly one thing. */
-.cite__mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--trace);
-  flex: none;
-}
-
-.cite__ref {
-  font-family: var(--face-evidence);
-  color: var(--trace-deep);
-}
-
-/* A synthesis question. No trace colour, no badge, no warning icon — the absence
-   of the highlight is the signal, and it cannot be misread as an error. */
-.cite--none {
-  border-style: dashed;
   color: var(--graphite-light);
   cursor: default;
-  padding: 3px var(--s-3);
 }
 
 .reveal {
@@ -266,38 +244,8 @@
   color: var(--ink);
 }
 
-/* ---------- source panel ---------- */
+/* The source panel moved to provenance.css as the drag card's second face. */
 
-.source {
-  margin-top: var(--s-3);
-  padding: var(--s-4);
-  background: var(--trace-wash);
-  border-radius: var(--radius);
-  border-left: 3px solid var(--trace);
-}
-
-.source__ref {
-  margin: 0 0 var(--s-2);
-  font-family: var(--face-evidence);
-  font-size: var(--t-xs);
-  color: var(--trace-deep);
-}
-
-.source__text {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  font-size: var(--t-sm);
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
-.source__note {
-  margin: var(--s-3) 0 0;
-  font-family: var(--face-tool);
-  font-size: var(--t-xs);
-  color: var(--graphite);
-}
 
 .answer {
   margin-top: var(--s-3);

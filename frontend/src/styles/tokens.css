@@ -18,6 +18,21 @@
 @import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
+  /* Opt out of the browser's automatic dark inversion.
+   *
+   * Prepify has one theme on purpose. Every colour here is chosen against a paper
+   * ground: `--trace` is the only saturated hue in the product and its meaning
+   * depends on being the only one, `--trace-deep` exists because the raw hue fails
+   * contrast on paper, and the serif-on-paper metaphor is the exam.
+   *
+   * Without this declaration a browser in dark mode force-darkens the page at
+   * paint time — observed 2026-09-04, with `body` computing the correct light
+   * value and rendering as a dark slab. That inverts the surfaces the palette was
+   * built against and re-tints the one colour carrying the product's central
+   * claim. A dark theme, if it is ever wanted, is a designed palette rather than
+   * an automatic inversion of this one. */
+  color-scheme: light;
+
   /* ---- surface ---- */
   --paper: #fbfbfa;
   --paper-edge: #f2f2f0;

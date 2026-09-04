@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ProvenanceCard } from "../provenance/ProvenanceCard";
 import type { Paper as PaperDoc, PaperItem, PaperSection } from "./types";
 import "./paper.css";
 
@@ -128,7 +129,6 @@ function Section({
 }
 
 function Item({ item, number }: { item: PaperItem; number: number }) {
-  const [showSource, setShowSource] = useState(false);
   const [showAnswer, setShowAnswer] = useState(false);
 
   if (!item.filled) {
@@ -152,36 +152,38 @@ function Item({ item, number }: { item: PaperItem; number: number }) {
   return (
     <div className="item">
       <div className="item__body">
-        <p className="item__stem">
-          <span className="item__number">Q{number}.</span>
-          {item.stem}
-        </p>
+        {/* §4: the question and the page it came from occupy one space, and the
+            drag moves between them. Both faces are always mounted, so the paper's
+            line rhythm never shifts under the gesture. */}
+        <ProvenanceCard
+          enabled={Boolean(sourced)}
+          sourceLabel={
+            sourced ? `${item.source!.file} · p.${item.source!.pages.join(", ")}` : ""
+          }
+          question={
+            <>
+              <p className="item__stem">
+                <span className="item__number">Q{number}.</span>
+                {item.stem}
+              </p>
 
-        {item.options && item.options.length > 0 && (
-          <ol className="options">
-            {item.options.map((o) => (
-              <li key={o.label} className="options__row">
-                <span className="options__label">({o.label.toLowerCase()})</span>
-                <span className="options__text">{o.text}</span>
-              </li>
-            ))}
-          </ol>
-        )}
+              {item.options && item.options.length > 0 && (
+                <ol className="options">
+                  {item.options.map((o) => (
+                    <li key={o.label} className="options__row">
+                      <span className="options__label">({o.label.toLowerCase()})</span>
+                      <span className="options__text">{o.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
+          }
+          source={<SourceFace item={item} />}
+        />
 
         <div className="item__tools">
-          {sourced ? (
-            <button
-              type="button"
-              className="cite"
-              aria-expanded={showSource}
-              onClick={() => setShowSource((v) => !v)}
-            >
-              <span className="cite__mark" aria-hidden="true" />
-              <span className="cite__ref">
-                {item.source!.file} · p.{item.source!.pages.join(", ")}
-              </span>
-            </button>
-          ) : (
+          {!sourced && (
             /* No trace colour. The plainness IS the signal — a badge here would
                read as a warning, and a synthesis question is not a fault. */
             <span className="cite cite--none">
@@ -199,22 +201,6 @@ function Item({ item, number }: { item: PaperItem; number: number }) {
           </button>
         </div>
 
-        {showSource && sourced && (
-          <aside className="source" aria-label="Source passage">
-            <p className="source__ref">
-              {item.source!.file} · page {item.source!.pages.join(", ")}
-            </p>
-            <blockquote className="source__text">{item.source_excerpt}</blockquote>
-            <p className="source__note">
-              {item.factuality === "SUPPORTED"
-                ? "This passage states the answer."
-                : item.factuality === null || item.factuality === undefined
-                  ? "Not checked against the passage."
-                  : "The passage does not state this answer."}
-            </p>
-          </aside>
-        )}
-
         {showAnswer && (
           <aside className="answer" aria-label="Answer">
             <p className="answer__value">{item.model_answer}</p>
@@ -229,5 +215,44 @@ function Item({ item, number }: { item: PaperItem; number: number }) {
         [{item.marks}]
       </div>
     </div>
+  );
+}
+
+
+/**
+ * The evidence side of the drag: the passage the question was written from.
+ *
+ * The wording is load-bearing. "Written from" is what the manifest actually
+ * records; "supported by" or "verified against" would claim a check nothing in
+ * this system performs (R6). The factuality line below is the only place a
+ * stronger statement appears, and only when gate 5 actually ran — `undefined`
+ * means it did not, which is different from checking and finding nothing.
+ */
+function SourceFace({ item }: { item: PaperItem }) {
+  if (!(item.from_material && item.source)) {
+    return (
+      <aside className="src src--synthesis" aria-label="Not from your material">
+        <p className="src__ref">no source</p>
+        <p className="src__text">
+          Not from your material — this question asks you to build something new.
+        </p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="src" aria-label="Source passage">
+      <p className="src__ref">
+        {item.source.file} · page {item.source.pages.join(", ")}
+      </p>
+      <blockquote className="src__text">{item.source_excerpt}</blockquote>
+      <p className="src__note">
+        {item.factuality === "SUPPORTED"
+          ? "The cited page states this."
+          : item.factuality === null || item.factuality === undefined
+            ? "Written from this page. Not checked against it."
+            : "The cited page does not state this answer."}
+      </p>
+    </aside>
   );
 }

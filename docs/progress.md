@@ -2760,3 +2760,103 @@ $ python -m pytest -q
 - `frontend/src/upload/` — the screen, the polling hook, the status types.
 - `tests/test_p7_ingest_job.py` — 30 tests: traversal, job lifecycle, contention, cleanup,
   and the real parser.
+
+---
+
+## 2026-09-04 (later) — Ask, the provenance drag, and the build closed
+
+**Status: PASS.** The last two items in `UI-DESIGN.md` §7. Sit-the-exam (§7.8) is
+explicitly phase 2 and stays out.
+
+### Chat had two failure modes it never handled
+
+`_run_chat_query` opens Qdrant. Ingest writes it. Qdrant takes an exclusive file lock
+(S8) — so a question asked during an indexing run reached the lock and raised, surfacing
+as a bare 500 that reads to a student as *"your notes are broken"*. It now refuses with a
+**409 naming the holder**, immediately rather than queueing: a chat request held open for
+the ten minutes an ingest takes is indistinguishable from a hang.
+
+Quota exhaustion was also a 500. It is a known limit, not a fault — the distinction
+`/api/exam` was fixed to draw in September and chat never had. Both it and an unreachable
+model now return a `degraded` 200 with a real answer, no citations, and
+`from_material: false`.
+
+### Gate — both chat paths, live, on the real corpus
+
+```
+"What is an admissible heuristic?"      traced   rail rgb(184,230,46) = --trace
+                                        cites    03_search.pdf p.75, p.84, p.80, p.79
+                                        41.0 s   (first request, model load)
+
+"What is the capital city of Portugal?" plain    rail rgb(223,225,230) = --rule
+                                        cites    none
+                                        label    "Answered from general knowledge —
+                                                  not from your uploads."
+```
+
+That contrast is the product. Every competitor answers both questions identically.
+
+### Gate — the drag, on the real 20-item paper
+
+20 cards, 12 toggles (the sourced items), 8 synthesis faces — matching the paper's
+`synthesis_items: 8` exactly.
+
+```
+pointerdown            → prov--dragging
+pointermove to 30%     → question translateX(-11.4%), opacity 0.7
+pointerup at 30%       → springs back to 0
+pointermove to 70%     → question opacity 0.3, source opacity 0.7
+pointerup at 70%       → latches open, toggle reads "Back to the question"
+
+sourced item   rail rgb(184,230,46) = --trace
+synthesis item rail rgb(200,204,212) = --rule-strong, no toggle
+```
+
+Two departures from the §4 sketch, both recorded there: **no highlighted supporting
+line** (nothing in the system locates the sentence that backs an answer, and marking one
+would be inventing evidence — R7), and **a button beside the drag**, because a drag-only
+affordance is unusable by keyboard.
+
+### Two defects the deadline nearly hid
+
+1. **`.cite` was declared in two stylesheets.** `paper.css` and `chat.css` both defined
+   it and both load globally, so whichever imported later silently won. Found while
+   removing the click-open source panel the drag replaced — which was where paper's
+   `.cite` came from, so deleting the dead code resolved the collision.
+2. **The whole app was being force-darkened.** `:root` declared no `color-scheme`, so a
+   browser in dark mode inverts the page at paint time: `body` computed the correct
+   `rgb(246,247,249)` and rendered as a dark slab. That inverts the surfaces every colour
+   here was chosen against and re-tints `--trace`, which is the one hue carrying the
+   product's central claim. Fixed with `color-scheme: light` on `:root`. A dark theme, if
+   ever wanted, is a designed palette — not an automatic inversion of this one.
+
+### Deliberately NOT claimed
+
+- **The model's own disclaimer duplicates ours.** On the ungrounded answer the text began
+  *"Not from your material: (Note: This response is not from the provided material.)"*
+  above our own label. That is backend prompt behaviour, pre-existing, and stripping a
+  known prefix from model output is fragile string-matching. Left as is, recorded here.
+- **LaTeX is not rendered.** `$h(n) \le h^*(n)$` reaches the screen as source. The paper
+  renderer has always had this property; nothing regressed.
+- **Still no frontend test runner.** Every frontend defect this week was found by opening
+  a browser. That has worked and does not scale.
+- **Sit-the-exam is not built.** Phase 2 by design, not an omission.
+
+```
+$ python -m pytest -q
+562 passed, 9 skipped        (was 551 / 9)
+```
+
+Six mutations applied and caught across the chat guards, one of which first reported NOT
+CAUGHT because `str.replace(..., 1)` had hit an identical block in `_hold_pipeline`
+instead of the chat route — the mutation was retargeted with unique surrounding context
+before it meant anything.
+
+### Files
+
+- `coursegen/app/main.py` — chat's contention guard, degraded handling, holder label.
+- `frontend/src/chat/` — the Ask screen.
+- `frontend/src/provenance/` — the drag card, used by the paper and ready for the landing.
+- `frontend/src/paper/Paper.tsx` — question and source are now the two faces of one card.
+- `frontend/src/styles/tokens.css` — `color-scheme: light`.
+- `tests/test_p7_chat_guard.py` — 11 tests.

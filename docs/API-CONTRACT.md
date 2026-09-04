@@ -243,6 +243,18 @@ when the connection does, so the paper may well have landed. Check `/api/paper`.
 `from_material: false` means the answer was **not** drawn from the uploaded course
 material. Surface that distinction — it is the whole point of the field.
 
+**409 when another job holds the pipeline** (added 2026-09-04), with `detail` naming the
+holder. Chat reads Qdrant and ingest writes it, and Qdrant takes an exclusive file lock
+(S8) — a question asked mid-ingest used to reach the lock and raise, surfacing as a bare
+500 that read as "your notes are broken". It refuses immediately rather than queueing: a
+chat request held open for the ten minutes an ingest takes is indistinguishable from a
+hang.
+
+**Known limits are `status: "degraded"` 200s, not 500s** — the same distinction `/api/exam`
+draws. Quota exhaustion and an unreachable model both return a real `answer` explaining
+what happened, `citations: []` and `from_material: false`. Only an unexpected error is a
+500.
+
 ### `GET /api/files/{filename}` → 200 / 404
 Serves from the output directory. `Path(filename).name` strips every directory component,
 so traversal is blocked (verified: 5/5 attempts return 404, including URL-encoded and

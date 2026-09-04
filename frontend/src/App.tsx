@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BlueprintScreen } from "./plan/BlueprintScreen";
 import { UploadScreen } from "./upload/UploadScreen";
+import { ChatScreen } from "./chat/ChatScreen";
 import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
 import type { Plan } from "./plan/types";
@@ -10,10 +11,10 @@ import "./styles/tokens.css";
 import "./harness.css";
 
 /**
- * Dev harness. Four screens: upload, the blueprint (with its free dry run), the
- * wait, and the paper. All run against the real API rather than fixtures.
+ * Dev harness. Five screens: upload, the blueprint (with its free dry run), the
+ * wait, the paper, and ask. All run against the real API rather than fixtures.
  */
-type Screen = "upload" | "blueprint" | "generating" | "paper";
+type Screen = "upload" | "blueprint" | "generating" | "paper" | "chat";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("blueprint");
@@ -68,7 +69,16 @@ export default function App() {
           >
             Paper
           </button>
+          <button
+            className={screen === "chat" ? "on" : ""}
+            disabled={busy}
+            onClick={() => setScreen("chat")}
+          >
+            Ask
+          </button>
         </nav>
+        {screen === "chat" && <ChatScreen />}
+
         {screen === "paper" && paper && (
           <label className="harness__filter">
             <input

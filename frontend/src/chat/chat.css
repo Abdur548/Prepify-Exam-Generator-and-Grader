@@ -1,0 +1,242 @@
+/* Ask — the one screen where --trace does its job by being absent.
+ *
+ * An answer drawn from the student's uploads gets the trace rail and its
+ * citations. An answer from general knowledge gets neither, and says so. That
+ * contrast only reads while nothing else on the screen is allowed the colour, so
+ * the ask button, the suggestions and the pending state are all slate.
+ */
+
+.chat {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+}
+
+.chat__title {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.chat__sub {
+  margin: var(--s-2) 0 0;
+  color: var(--graphite);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+/* ---------- empty state ---------- */
+
+.chat__empty {
+  margin-top: var(--s-6);
+  padding: var(--s-6) var(--s-5);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+}
+
+.chat__empty > p {
+  margin: 0 0 var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+}
+
+.chat__suggest {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.chat__suggest button {
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+  background: var(--app-bg);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.chat__suggest button:hover {
+  border-color: var(--rule-strong);
+}
+
+/* ---------- thread ---------- */
+
+.thread {
+  list-style: none;
+  margin: var(--s-6) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-6);
+}
+
+.turn__q {
+  margin: 0;
+  font-family: var(--face-paper);
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.turn__pending {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-sm);
+  color: var(--graphite-light);
+}
+
+.turn__dots {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--graphite-light);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.turn__fail {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: #fff;
+  border-left: 3px solid var(--stop);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--t-sm);
+}
+
+/* Busy is not broken: the server is indexing or generating, and the question will
+   work shortly. Amber, and never the stop colour. */
+.turn__fail--busy {
+  border-left-color: var(--warn);
+  background: var(--warn-wash);
+}
+
+.turn__fail p {
+  margin: 0;
+}
+
+.turn__failhint {
+  margin-top: var(--s-2) !important;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+/* ---------- the answer ---------- */
+
+.ans {
+  margin-top: var(--s-3);
+  padding-left: var(--s-4);
+  /* The default: no rail. A general-knowledge answer is defined by this absence,
+     so the ungrounded case needs no styling of its own. */
+  border-left: 3px solid var(--rule);
+}
+
+.ans--traced {
+  border-left-color: var(--trace);
+}
+
+.ans__text {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.cites {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+}
+
+.cite {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 2px var(--s-2);
+  background: var(--trace-wash);
+  border-radius: 3px;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--trace-deep);
+}
+
+.cite__page {
+  color: var(--graphite);
+}
+
+/* No trace colour anywhere in here — that is the whole point. */
+.ans__ungrounded {
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.ans__degraded {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--warn);
+}
+
+/* ---------- ask ---------- */
+
+.ask {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-6);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--rule);
+}
+
+.ask__input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--s-3) var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.ask__input:disabled {
+  background: var(--paper-edge);
+}
+
+.ask__btn {
+  flex: none;
+  padding: var(--s-3) var(--s-5);
+  background: var(--slate);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.ask__btn:disabled {
+  background: var(--graphite-light);
+  cursor: default;
+}
+
+.ask__note {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}
