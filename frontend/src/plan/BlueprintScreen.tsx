@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Plan } from "./types";
+import { Blocked, Unreachable } from "../system/Blocked";
+import { blockers, usePreflight } from "../system/usePreflight";
 import "./plan.css";
 
 /**
@@ -36,6 +38,18 @@ export function BlueprintScreen({ onGenerate }: Props) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
+  const preflight = usePreflight();
+  const stopped = blockers(preflight.checks, "generate");
+  const [attempt, setAttempt] = useState(0);
+
+  // "Check again" has to retry BOTH. An outage fails the preflight and the dry
+  // run together, so clearing only the first left the panel blank — no figures,
+  // no Generate — until the student changed preset or reloaded, with nothing on
+  // screen saying why.
+  const retry = () => {
+    setAttempt((a) => a + 1);
+    preflight.refresh();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +77,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [blueprintId]);
+  }, [blueprintId, attempt]);
 
   return (
     <div className="bp">
@@ -163,7 +177,14 @@ export function BlueprintScreen({ onGenerate }: Props) {
               </span>
             </header>
 
-            {status === "error" && (
+            {/* Order matters. A dead server fails the dry run too, and the
+                hint below tells the student to go and upload something — which
+                is wrong advice, confidently given, when the real cause is that
+                nothing is listening. The outage explains the plan failure, so
+                it is reported first and the plan error is suppressed. */}
+            {preflight.unreachable ? (
+              <Unreachable onRetry={retry} />
+            ) : status === "error" ? (
               <p className="panel__error">
                 {error}
                 <span className="panel__errorhint">
@@ -171,7 +192,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
                   anything yet, start there.
                 </span>
               </p>
-            )}
+            ) : null}
 
             {plan && status !== "error" && (
               <>
@@ -222,18 +243,38 @@ export function BlueprintScreen({ onGenerate }: Props) {
                   </ul>
                 )}
 
-                <button
-                  type="button"
-                  className="generate"
-                  onClick={() => onGenerate?.(blueprintId, plan)}
-                >
-                  Write these {plan.summary.slots_planned} questions
-                </button>
-                <p className="generate__cost">
-                  About {plan.summary.estimated_calls} request
-                  {plan.summary.estimated_calls === 1 ? "" : "s"} to the model.
-                  Takes around a minute the first time.
-                </p>
+                {/* The gate, not a disabled button beside an explanation.
+                    `memory` failing means the OS kills the process on load -
+                    an access violation no handler catches and no screen can
+                    report afterwards, so BEFORE the press is the only place it
+                    can be prevented. */}
+                {preflight.unreachable ? (
+                  <Unreachable onRetry={retry} />
+                ) : stopped.length > 0 ? (
+                  <Blocked
+                    blockers={stopped}
+                    action="build a paper"
+                    onRetry={retry}
+                  />
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="generate"
+                      disabled={preflight.loading}
+                      onClick={() => onGenerate?.(blueprintId, plan)}
+                    >
+                      {preflight.loading
+                        ? "Checking this machine…"
+                        : `Write these ${plan.summary.slots_planned} questions`}
+                    </button>
+                    <p className="generate__cost">
+                      About {plan.summary.estimated_calls} request
+                      {plan.summary.estimated_calls === 1 ? "" : "s"} to the model.
+                      Takes around a minute the first time.
+                    </p>
+                  </>
+                )}
               </>
             )}
           </div>

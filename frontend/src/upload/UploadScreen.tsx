@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import type { IngestFile, IngestStage, IngestState } from "./types";
 import { useIngestJob } from "./useIngestJob";
+import { Blocked, Unreachable } from "../system/Blocked";
+import { blockers, usePreflight } from "../system/usePreflight";
 import "./upload.css";
 
 /**
@@ -43,6 +45,10 @@ interface Props {
 
 export function UploadScreen({ onDone }: Props) {
   const job = useIngestJob();
+  const preflight = usePreflight();
+  // Ingest makes no LLM call, so a missing API key does not stop it. It does need
+  // the embedder, and `memory` is what decides whether the embedder can run.
+  const stopped = blockers(preflight.checks, "ingest");
   const busy =
     job.state?.status === "queued" || job.state?.status === "running";
 
@@ -62,7 +68,17 @@ export function UploadScreen({ onDone }: Props) {
         <Running state={job.state!} />
       ) : (
         <>
-          <Dropzone onFiles={job.start} error={job.error} />
+          {preflight.unreachable ? (
+            <Unreachable onRetry={preflight.refresh} />
+          ) : stopped.length > 0 ? (
+            <Blocked
+              blockers={stopped}
+              action="index your material"
+              onRetry={preflight.refresh}
+            />
+          ) : (
+            <Dropzone onFiles={job.start} error={job.error} />
+          )}
           {job.state && job.state.status !== "idle" && (
             <Finished state={job.state} onDismiss={job.dismiss} onDone={onDone} />
           )}

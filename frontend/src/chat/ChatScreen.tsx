@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatAnswer, Turn } from "./types";
+import { Blocked, Unreachable } from "../system/Blocked";
+import { blockers, usePreflight } from "../system/usePreflight";
 import "./chat.css";
 
 /**
@@ -37,6 +39,11 @@ export function ChatScreen() {
   const [pending, setPending] = useState(false);
   const nextId = useRef(1);
   const tail = useRef<HTMLDivElement>(null);
+  const preflight = usePreflight();
+  // Chat needs no output directory and no PDF renderer, so it is not blocked on
+  // them. Saying "you can't ask questions" because WeasyPrint is missing would
+  // be a false statement about what is broken.
+  const stopped = blockers(preflight.checks, "chat");
 
   useEffect(() => {
     tail.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -128,6 +135,16 @@ export function ChatScreen() {
       )}
       <div ref={tail} />
 
+      {preflight.unreachable ? (
+        <Unreachable onRetry={preflight.refresh} />
+      ) : stopped.length > 0 ? (
+        <Blocked
+          blockers={stopped}
+          action="answer questions"
+          onRetry={preflight.refresh}
+        />
+      ) : (
+      <>
       <form
         className="ask"
         onSubmit={(e) => {
@@ -141,9 +158,13 @@ export function ChatScreen() {
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Ask about anything in your material…"
           aria-label="Your question"
-          disabled={pending}
+          disabled={pending || preflight.loading}
         />
-        <button className="ask__btn" type="submit" disabled={pending || !draft.trim()}>
+        <button
+          className="ask__btn"
+          type="submit"
+          disabled={pending || preflight.loading || !draft.trim()}
+        >
           {pending ? "Thinking…" : "Ask"}
         </button>
       </form>
@@ -152,6 +173,8 @@ export function ChatScreen() {
         The first question of a session takes about half a minute while the models
         load.
       </p>
+      </>
+      )}
     </div>
   );
 }

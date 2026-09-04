@@ -1,0 +1,80 @@
+/* Blocking notices — the tool speaking about itself, so grotesque throughout and
+ * no --trace anywhere. A machine that cannot run the models has nothing to do
+ * with provenance. */
+
+.blocked {
+  margin-top: var(--s-5);
+  padding: var(--s-5);
+  background: var(--warn-wash);
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+
+.blocked__lead {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.blocked__hint {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.blocked__list {
+  margin: var(--s-4) 0 0;
+  display: grid;
+  gap: var(--s-3);
+}
+
+.blocked__list > div {
+  display: grid;
+  gap: 2px;
+}
+
+.blocked__list dt {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The backend's own failure string. Mono because it is evidence, and wrapped
+   rather than truncated — the memory check's remedy is at the END of its
+   sentence, and an ellipsis would eat the only actionable part. */
+.blocked__list dd {
+  margin: 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  line-height: 1.6;
+  color: var(--graphite);
+  overflow-wrap: anywhere;
+}
+
+.blocked__cmd {
+  display: block;
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  overflow-x: auto;
+}
+
+.blocked__btn {
+  margin-top: var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  background: #fff;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.blocked__btn:hover {
+  border-color: var(--graphite);
+}
