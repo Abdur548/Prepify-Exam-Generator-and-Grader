@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatAnswer, Turn } from "./types";
 import { Blocked, Unreachable } from "../system/Blocked";
 import { blockers, usePreflight } from "../system/usePreflight";
+import { useTopics } from "./useTopics";
 import "./chat.css";
 
 /**
@@ -24,12 +25,6 @@ import "./chat.css";
  * against a source (R6). The copy says "drawn from", and stays there.
  */
 
-const SUGGESTIONS = [
-  "What is an admissible heuristic?",
-  "Explain alpha-beta pruning simply",
-  "Where do my notes cover constraint satisfaction?",
-];
-
 /** Kept short deliberately — see `send`. */
 const HISTORY_TURNS = 6;
 
@@ -44,6 +39,7 @@ export function ChatScreen() {
   // them. Saying "you can't ask questions" because WeasyPrint is missing would
   // be a false statement about what is broken.
   const stopped = blockers(preflight.checks, "chat");
+  const topics = useTopics(3);
 
   useEffect(() => {
     tail.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -117,14 +113,30 @@ export function ChatScreen() {
 
       {turns.length === 0 ? (
         <div className="chat__empty">
-          <p>Try one of these, or ask your own.</p>
-          <div className="chat__suggest">
-            {SUGGESTIONS.map((s) => (
-              <button key={s} type="button" onClick={() => void send(s)}>
-                {s}
-              </button>
-            ))}
-          </div>
+          {/* Drawn from the corpus that is actually loaded. Three hardcoded
+              questions about A* search used to sit here — right for the deck this
+              was built against, nonsense to anyone who uploaded chemistry. When
+              there is no corpus there are no examples, rather than invented
+              ones. */}
+          {topics.length > 0 ? (
+            <>
+              <p>Your material covers these. Try one, or ask your own.</p>
+              <div className="chat__suggest">
+                {topics.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void send(`Explain ${t}`)}
+                  >
+                    Explain {t}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p>Ask anything about the material you have uploaded.</p>
+          )}
         </div>
       ) : (
         <ol className="thread">

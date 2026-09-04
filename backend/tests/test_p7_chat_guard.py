@@ -194,3 +194,74 @@ class TestGuardsAreLoadBearing:
         assert src.count(original) >= 1, "guard moved"
         mutated = src.replace(original, "if False:", 1)
         assert mutated != src, "MUTATION DID NOT APPLY — result is meaningless"
+
+
+class TestTopicsComeFromTheCorpus:
+    """The chat empty state used to hardcode three questions about A* search and
+    alpha-beta pruning — correct for the deck this was built against, nonsense to
+    anyone who uploaded organic chemistry. Same defect as the hardcoded blueprint
+    presets: the UI asserting facts about content it cannot know."""
+
+    def _nodes(self, paths_and_mass):
+        from coursegen.contracts.course_map import CourseMapNode, NodeFlags
+
+        return [
+            CourseMapNode(
+                node_id=f"n{i}", path=list(p), source_file="deck.pdf",
+                page_span=(1, 2), key_terms=[], token_count=100,
+                instructional_mass=m, chunk_ids=[f"c{i}"], flags=NodeFlags(),
+            )
+            for i, (p, m) in enumerate(paths_and_mass)
+        ]
+
+    def test_topics_are_headings_ordered_by_weight(self, client) -> None:
+        nodes = self._nodes([
+            (["deck.pdf", "Course", "Titration"], 0.1),
+            (["deck.pdf", "Course", "Stoichiometry"], 0.9),
+            (["deck.pdf", "Course", "Buffers"], 0.5),
+        ])
+        with patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes):
+            body = client.get("/api/topics").json()
+
+        assert body == ["Stoichiometry", "Buffers", "Titration"]
+
+    def test_bare_filenames_are_not_topics(self, client) -> None:
+        """A node whose whole path is the filename is the document, not a heading
+        anyone would recognise as a subject."""
+        nodes = self._nodes([
+            (["03_search.pdf"], 0.9),
+            (["deck.pdf", "Course", "Real Heading"], 0.1),
+        ])
+        with patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes):
+            assert client.get("/api/topics").json() == ["Real Heading"]
+
+    def test_duplicates_and_unusable_headings_are_dropped(self, client) -> None:
+        long_heading = "x" * 200
+        nodes = self._nodes([
+            (["d.pdf", "C", "Buffers"], 0.9),
+            (["d.pdf", "C", "buffers"], 0.8),      # same topic, different case
+            (["d.pdf", "C", long_heading], 0.7),    # a paragraph, not a heading
+            (["d.pdf", "C", "ok"], 0.6),            # too short
+            (["d.pdf", "C", "notes.pptx"], 0.5),    # a filename as a heading
+            (["d.pdf", "C", "Acids"], 0.4),
+        ])
+        with patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes):
+            assert client.get("/api/topics").json() == ["Buffers", "Acids"]
+
+    def test_no_corpus_is_an_empty_list_not_an_error(self, client) -> None:
+        """A new install has no course map. The chat box still works, so the
+        endpoint behind its examples must not 500."""
+        with patch("coursegen.ingest.coursemap.load_course_map",
+                   side_effect=FileNotFoundError("no course map")):
+            resp = client.get("/api/topics")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_the_limit_is_bounded(self, client) -> None:
+        """`?limit=` is client-supplied. Unbounded, it is a request to serialise
+        every heading in the corpus."""
+        nodes = self._nodes([(["d.pdf", "C", f"Topic {i}"], 1.0 - i / 100) for i in range(50)])
+        with patch("coursegen.ingest.coursemap.load_course_map", return_value=nodes):
+            assert len(client.get("/api/topics?limit=9999").json()) == 20
+            assert len(client.get("/api/topics?limit=0").json()) == 1

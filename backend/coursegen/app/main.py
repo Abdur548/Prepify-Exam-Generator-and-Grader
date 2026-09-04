@@ -151,6 +151,54 @@ def list_blueprints() -> list[str]:
     return sorted(p.stem for p in _BLUEPRINT_DIR.glob("*.json"))
 
 
+@app.get("/api/topics")
+def list_topics(limit: int = 6) -> list[str]:
+    """The densest topics in the student's own material, by name.
+
+    Exists so screens can offer examples drawn from the corpus that is actually
+    loaded. The chat empty state used to hardcode three questions about A* search
+    and alpha-beta pruning — fine against the AI deck it was built on, nonsense to
+    anyone who uploaded organic chemistry, and the same defect as the hardcoded
+    blueprint presets: the UI asserting facts about content it cannot know.
+
+    The **last path element** is the topic, not `key_terms`. Key terms come from
+    YAKE and on this corpus include author names and sentence fragments
+    ("Michael Hahsler based", "Advanced Step"); the path's last element is the
+    slide's own heading, written by whoever made the deck.
+
+    Costs no quota and loads no model — the same course map `/api/plan` reads.
+    Returns `[]` rather than raising when nothing is ingested: an empty corpus is
+    a normal state for a new install, not an error.
+    """
+    from coursegen.ingest.coursemap import load_course_map
+
+    try:
+        nodes = load_course_map(config.COURSE_MAP_PATH)
+    except Exception:  # noqa: BLE001 - no corpus yet is not a failure
+        return []
+
+    seen: set[str] = set()
+    topics: list[str] = []
+    for node in sorted(nodes, key=lambda n: -n.instructional_mass):
+        if len(node.path) < 2:
+            continue  # the bare filename, not a heading
+        name = node.path[-1].strip()
+        key = name.casefold()
+        if key in seen:
+            continue
+        # A heading that is a filename, a fragment, or a paragraph is not a topic
+        # anyone would recognise as one.
+        if not (3 <= len(name) <= 60) or name.lower().endswith(
+            (".pdf", ".pptx", ".docx")
+        ):
+            continue
+        seen.add(key)
+        topics.append(name)
+        if len(topics) >= max(1, min(limit, 20)):
+            break
+    return topics
+
+
 @app.post("/api/internal/reset-disclosure")
 def _reset_disclosure() -> dict[str, bool]:
     """Test helper — resets disclosure flag. Must not be exposed in production UI."""
