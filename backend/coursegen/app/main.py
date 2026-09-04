@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import os
 import queue
 import shutil
 import tempfile
@@ -223,9 +224,31 @@ def list_topics(limit: int = 6) -> list[str]:
     return topics
 
 
+def _test_seams_enabled() -> bool:
+    """Whether the `/api/internal/*` routes will answer.
+
+    Read per-request rather than captured at import, so a test can turn it on with
+    `monkeypatch.setenv` after the app object already exists.
+    """
+    return os.getenv("PREPIFY_TEST_SEAMS") == "1"
+
+
 @app.post("/api/internal/reset-disclosure")
 def _reset_disclosure() -> dict[str, bool]:
-    """Test helper — resets disclosure flag. Must not be exposed in production UI."""
+    """Test helper — resets the disclosure flag.
+
+    `API-CONTRACT.md` has always said "Not for the UI", and it was nonetheless a
+    live unauthenticated POST on every running server: anything that could reach
+    the port could clear the consent gate. The impact was small — it re-gates
+    rather than un-gates, so it makes the system more conservative — but a route
+    documented as not-for-production should not be reachable in production.
+
+    404, not 403, when the seam is off. A 403 confirms the route exists; a 404 is
+    what an endpoint that is not there looks like, and this endpoint should look
+    like it is not there.
+    """
+    if not _test_seams_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
     global _disclosure_accepted
     _disclosure_accepted = False
     return {"reset": True}

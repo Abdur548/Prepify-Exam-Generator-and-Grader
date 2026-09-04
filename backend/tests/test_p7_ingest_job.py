@@ -744,3 +744,50 @@ class TestLimitsAreServed:
         """`.ppt` is scanned so it can be rejected by name with a remedy, but it
         can never be parsed. Offering it invites an upload that always fails."""
         assert ".ppt" not in client.get("/api/limits").json()["extensions"]
+
+
+class TestTheTestSeamIsOffByDefault:
+    """`API-CONTRACT.md` has always said `/api/internal/*` is "Not for the UI",
+    and nothing enforced it: on every running server it was a live,
+    unauthenticated POST that cleared the consent gate.
+
+    The suite's conftest turns the seam ON for the whole session, so without this
+    test nothing would ever exercise the default — the gate would look guarded
+    and be open everywhere it matters.
+    """
+
+    def test_the_seam_is_404_without_the_env_flag(self, client, monkeypatch) -> None:
+        monkeypatch.delenv("PREPIFY_TEST_SEAMS", raising=False)
+        resp = client.post("/api/internal/reset-disclosure")
+        assert resp.status_code == 404
+
+    def test_a_wrong_value_does_not_enable_it(self, client, monkeypatch) -> None:
+        for value in ("0", "true", "yes", ""):
+            monkeypatch.setenv("PREPIFY_TEST_SEAMS", value)
+            assert client.post("/api/internal/reset-disclosure").status_code == 404
+
+    def test_the_flag_still_works_when_set(self, client, monkeypatch) -> None:
+        monkeypatch.setenv("PREPIFY_TEST_SEAMS", "1")
+        assert client.post("/api/internal/reset-disclosure").status_code == 200
+
+    def test_a_404_looks_like_a_route_that_is_not_there(self, client, monkeypatch) -> None:
+        """403 would confirm the route exists. This endpoint should look absent."""
+        monkeypatch.delenv("PREPIFY_TEST_SEAMS", raising=False)
+        assert client.post("/api/internal/reset-disclosure").status_code != 403
+
+    def test_disclosure_cannot_be_cleared_through_the_seam_by_default(
+        self, client, monkeypatch
+    ) -> None:
+        """The behaviour, not just the status code."""
+        monkeypatch.setenv("PREPIFY_TEST_SEAMS", "1")
+        client.post("/api/internal/reset-disclosure")
+        client.post("/api/disclosure/accept")
+
+        monkeypatch.delenv("PREPIFY_TEST_SEAMS", raising=False)
+        client.post("/api/internal/reset-disclosure")
+
+        with patch("coursegen.app.main._exam_outcome", return_value={"status": "ok"}):
+            resp = client.post(
+                "/api/exam", json={"blueprint_id": "quiz_default", "title": "T"}
+            )
+        assert resp.status_code != 403, "the seam cleared the gate while disabled"

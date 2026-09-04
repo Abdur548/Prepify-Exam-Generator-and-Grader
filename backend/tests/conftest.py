@@ -462,3 +462,24 @@ def rich_source_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     prs.save(str(source_dir / "slides.pptx"))
     png_path.unlink()   # keep only the two parseable documents in the corpus
     return source_dir
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _enable_test_seams():
+    """Turn on the `/api/internal/*` routes for the suite.
+
+    They are 404 by default so a running server does not expose an
+    unauthenticated way to clear the consent gate (`API-CONTRACT.md` has always
+    said "Not for the UI"; nothing enforced it). The tests that reset disclosure
+    between cases need them, and this is the only place that should switch them
+    on.
+    """
+    import os
+
+    previous = os.environ.get("PREPIFY_TEST_SEAMS")
+    os.environ["PREPIFY_TEST_SEAMS"] = "1"
+    yield
+    if previous is None:
+        os.environ.pop("PREPIFY_TEST_SEAMS", None)
+    else:
+        os.environ["PREPIFY_TEST_SEAMS"] = previous
