@@ -45,6 +45,19 @@ interface Props {
 /** Past this fraction of the card's width, a release latches instead of springing. */
 const LATCH_AT = 0.5;
 
+/**
+ * How far a pointer must travel before it is a drag rather than a selection.
+ *
+ * Without this the card claimed every press: reading a question and dragging
+ * across its stem to select the text moved the card instead, and there was no
+ * way to select question text with a mouse at all.
+ *
+ * The gesture also has to be mostly horizontal. A press that moves down the page
+ * is someone selecting several lines, or scrolling on a trackpad, and neither
+ * should dissolve the question they are reading.
+ */
+const DRAG_THRESHOLD_PX = 8;
+
 export function ProvenanceCard({
   question,
   source,
@@ -58,6 +71,9 @@ export function ProvenanceCard({
   const [drag, setDrag] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const startX = useRef(0);
+  const startY = useRef(0);
+  // A press that has not yet decided whether it is a drag or a selection.
+  const pending = useRef(false);
 
   const progress = drag ?? (open ? 1 : 0);
 
@@ -68,7 +84,10 @@ export function ProvenanceCard({
       // press makes the question unreadable.
       if ((e.target as HTMLElement).closest("button, a")) return;
       startX.current = e.clientX;
-      setDrag(open ? 1 : 0);
+      startY.current = e.clientY;
+      // Armed, not started. `setDrag` waits until the pointer proves intent, so a
+      // press that turns out to be a selection never disturbs the card.
+      pending.current = true;
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
@@ -84,16 +103,35 @@ export function ProvenanceCard({
 
   const onMove = useCallback(
     (e: React.PointerEvent) => {
-      if (drag === null) return;
+      if (drag === null && !pending.current) return;
+
+      const dx = e.clientX - startX.current;
+      const dy = e.clientY - startY.current;
+
+      if (drag === null) {
+        // Still deciding. Below the threshold, do nothing at all — the browser
+        // keeps handling it as a selection.
+        if (Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) {
+          return;
+        }
+        // Committed, but only if the intent was sideways. A mostly vertical
+        // press is a selection down the page or a scroll, and it releases the
+        // gesture rather than fighting it.
+        pending.current = false;
+        if (Math.abs(dy) > Math.abs(dx)) return;
+      }
+
       const width = box.current?.offsetWidth ?? 1;
       const base = open ? 1 : 0;
-      const moved = (e.clientX - startX.current) / width;
-      setDrag(Math.min(1, Math.max(0, base + moved)));
+      setDrag(Math.min(1, Math.max(0, base + dx / width)));
     },
     [drag, open],
   );
 
   const onUp = useCallback(() => {
+    pending.current = false;
+    // A press that never crossed the threshold was a click or a selection, and
+    // must not latch the card open on release.
     if (drag === null) return;
     setOpen(drag > LATCH_AT);
     setDrag(null);
