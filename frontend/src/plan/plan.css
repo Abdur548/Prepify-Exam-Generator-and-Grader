@@ -344,3 +344,11 @@
     order: -1; /* the dry run is the point; on narrow screens it leads */
   }
 }
+
+/* Status under the preset grid — listing, failing, or empty. */
+.presets__note {
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite-light);
+}

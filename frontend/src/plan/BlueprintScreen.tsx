@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Plan } from "./types";
 import { Blocked, Unreachable } from "../system/Blocked";
 import { blockers, usePreflight } from "../system/usePreflight";
+import { useBlueprints } from "./useBlueprints";
 import "./plan.css";
 
 /**
@@ -17,13 +18,6 @@ import "./plan.css";
  * the shortfalls, and only then commit.
  */
 
-const PRESETS = [
-  { id: "quiz_default", label: "Quick quiz", hint: "20 marks · 30 min" },
-  { id: "midterm_default", label: "Midterm", hint: "60 marks · 90 min" },
-  { id: "final_default", label: "Final", hint: "100 marks · 180 min" },
-  { id: "ai_fundamentals_v1", label: "AI Fundamentals", hint: "authored · 100 marks" },
-];
-
 type Status = "idle" | "loading" | "ready" | "error";
 
 interface Props {
@@ -34,7 +28,11 @@ interface Props {
 }
 
 export function BlueprintScreen({ onGenerate }: Props) {
-  const [blueprintId, setBlueprintId] = useState(PRESETS[0].id);
+  const { presets, loading: listing, error: listError } = useBlueprints();
+  // Empty until the server says what it has. Defaulting to a literal id would
+  // reintroduce exactly the assumption this screen stopped making.
+  const [chosen, setChosen] = useState<string | null>(null);
+  const blueprintId = chosen ?? presets[0]?.id ?? null;
   const [plan, setPlan] = useState<Plan | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
@@ -52,6 +50,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
   };
 
   useEffect(() => {
+    if (!blueprintId) return;
     let cancelled = false;
     setStatus("loading");
     fetch("/api/plan", {
@@ -97,20 +96,38 @@ export function BlueprintScreen({ onGenerate }: Props) {
               <span className="field__why">How long it is and what it is worth.</span>
             </legend>
             <div className="presets" role="radiogroup" aria-label="Paper shape">
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <button
                   key={p.id}
                   type="button"
                   role="radio"
                   aria-checked={blueprintId === p.id}
                   className={`preset${blueprintId === p.id ? " preset--on" : ""}`}
-                  onClick={() => setBlueprintId(p.id)}
+                  onClick={() => setChosen(p.id)}
                 >
-                  <span className="preset__label">{p.label}</span>
-                  <span className="preset__hint">{p.hint}</span>
+                  <span className="preset__label">{p.title}</span>
+                  <span className="preset__hint">
+                    {p.marks !== null
+                      ? `${p.marks} marks · ${p.minutes} min`
+                      : /* The plan for this one could not be read. The blueprint
+                           is still offered, because it exists — but no numbers
+                           are shown, rather than invented ones. */
+                        p.id}
+                  </span>
                 </button>
               ))}
             </div>
+            {listing && (
+              <p className="presets__note">Asking the server what it can build…</p>
+            )}
+            {listError && (
+              <p className="presets__note">
+                Could not list the papers this server can build ({listError}).
+              </p>
+            )}
+            {!listing && !listError && presets.length === 0 && (
+              <p className="presets__note">This server has no blueprints installed.</p>
+            )}
           </fieldset>
 
           {plan && (
