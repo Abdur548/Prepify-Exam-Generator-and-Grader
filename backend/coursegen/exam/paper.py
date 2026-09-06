@@ -93,28 +93,54 @@ def build_paper(
             "item_type": section.item_type,
             "marks_each": section.marks_each,
             "count": section.count,
-            "instruction": _section_instruction(section, len(slot_ids)),
+            # The FILLED count, which is what this function's own docstring
+            # always said it used. `len(slot_ids)` is the ALLOCATED count, so a
+            # section that lost two questions at a gate still promised them.
+            "instruction": _section_instruction(
+                section, sum(1 for r in rendered if r["filled"])
+            ),
             "items": rendered,
         })
 
     synthesis = sum(1 for s in specs if s.grounding == "synthesis")
+
+    # DELIVERED, not allocated. These are different facts and the paper must
+    # print the first: a slot the solver placed and the gates then destroyed is
+    # not a question on the page, however successful the allocation was.
+    delivered = sum(1 for sec in sections for r in sec["items"] if r["filled"])
+    marks_available = sum(s.marks for s in specs if s.slot_id in item_by_slot)
+    # Every slot with no question, whichever stage lost it: the ones the solver
+    # could not place (`coverage.unfilled_slots`, which have no spec and appear
+    # in no section) plus the ones it placed and a gate rejected.
+    missing = sorted(
+        set(coverage.unfilled_slots)
+        | {s.slot_id for s in specs if s.slot_id not in item_by_slot}
+    )
     return {
         "title": title,
         "blueprint_id": blueprint.blueprint_id,
         "blueprint_title": blueprint.title,
         "total_marks": blueprint.total_marks,
         "duration_minutes": blueprint.duration_minutes,
-        "instructions": _general_instructions(blueprint, coverage),
+        "instructions": _general_instructions(blueprint, sections, marks_available),
         "sections": sections,
         "summary": {
             "items_total": len(items),
             "slots_total": coverage.slots_total,
-            "fill_ratio": coverage.fill_ratio,
+            # Delivery, not allocation. `coverage.fill_ratio` counts slots the
+            # SOLVER filled, so it read 1.0 on a paper missing 2 of 7 questions
+            # while `unfilled_slots` read `[]` beside `items_count: 5`. A client
+            # trusting those showed a clean paper.
+            "fill_ratio": (delivered / coverage.slots_total) if coverage.slots_total else 0.0,
+            "unfilled_slots": missing,
             "allocation_fidelity": coverage.allocation_fidelity,
-            "unfilled_slots": list(coverage.unfilled_slots),
-            "marks_available": sum(
-                s.marks for s in specs if s.slot_id in item_by_slot
-            ),
+            # The allocator's own view, kept rather than dropped — "the solver
+            # placed every slot" and "every slot has a question" are both worth
+            # knowing, and the gap between them is exactly where questions are
+            # being lost at the gates.
+            "allocation_fill_ratio": coverage.fill_ratio,
+            "allocation_unfilled_slots": list(coverage.unfilled_slots),
+            "marks_available": marks_available,
             # Counted, not hidden. A paper where most questions cannot be answered
             # from the upload is a legitimate blueprint outcome and a fact the
             # student needs before they start revising from it.
@@ -176,25 +202,54 @@ def _section_instruction(section, filled: int) -> str:
     instruction promising ten questions above a section holding eight is worse
     than no instruction.
     """
+    if filled == 0:
+        # "0 questions, 2 marks each" is arithmetic, not a sentence. A section the
+        # material could not fill at all still appears on the paper, with its gaps
+        # rendered, so it needs a line that reads.
+        return "No questions could be built for this section."
     noun = "question" if filled == 1 else "questions"
     each = f"{section.marks_each} mark{'s' if section.marks_each != 1 else ''} each"
     return f"{filled} {noun}, {each}."
 
 
-def _general_instructions(blueprint: Blueprint, coverage: CoverageReport) -> list[str]:
+def _general_instructions(
+    blueprint: Blueprint,
+    sections: list[dict[str, Any]],
+    marks_available: int,
+) -> list[str]:
     """The numbered block a student reads before starting.
 
     Derived, never written down. TestMacher's papers carry the same block and it is
     most of what makes a generated paper read as a real one.
+
+    Every number here describes the paper as DELIVERED. It used to describe the
+    blueprint and the allocation instead, and on a real run all four lines were
+    false at once — "There are 7 questions in this paper. The paper carries 20
+    marks." above a paper holding 5 questions and 13 marks, with per-section
+    counts to match. In the browser it sat two lines above the client's own
+    shortfall banner, contradicting it in a single viewport.
+
+    `blueprint.total_marks` is still reported, as `total_marks` at the top level:
+    what the paper was MEANT to be worth is a real fact and the renderer shows it
+    beside what it is worth. It is just not what the instruction block claims.
     """
+    delivered = sum(1 for sec in sections for r in sec["items"] if r["filled"])
+    noun = "question" if delivered == 1 else "questions"
     lines = [
-        f"There are {coverage.slots_filled} questions in this paper.",
-        f"The paper carries {blueprint.total_marks} marks and allows "
+        f"There are {delivered} {noun} in this paper.",
+        f"The paper carries {marks_available} marks and allows "
         f"{blueprint.duration_minutes} minutes.",
     ]
-    for section in blueprint.sections:
+    for section in sections:
+        n = sum(1 for r in section["items"] if r["filled"])
+        if n == 0:
+            lines.append(
+                f"Section {section['section_id']} — {section['title']}: "
+                "no questions could be built."
+            )
+            continue
         lines.append(
-            f"Section {section.section_id} — {section.title}: "
-            f"{section.count} × {section.marks_each} marks."
+            f"Section {section['section_id']} — {section['title']}: "
+            f"{n} × {section['marks_each']} marks."
         )
     return lines

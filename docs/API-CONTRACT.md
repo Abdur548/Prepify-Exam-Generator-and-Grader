@@ -171,6 +171,21 @@ back, and do not compute an equivalent in the frontend. `fill_ratio` is the comp
 number; `allocation_fidelity` is the share of slots placed by instructional mass rather
 than by span exhaustion.
 
+**`fill_ratio` and `unfilled_slots` describe DELIVERY, changed 2026-09-06.** They used to
+come from the allocator, which knows only whether the *solver* placed a slot — so a run
+that placed all seven and then lost two at the validation gates answered
+`fill_ratio: 1.0` and `unfilled_slots: []` beside `items_count: 5`. Any client trusting
+this contract showed a clean paper over a paper missing two questions.
+
+`unfilled_slots` now names every slot with no question in it, whichever stage lost it:
+the ones the solver could not place, plus the ones it placed and a gate rejected.
+`fill_ratio` is `items delivered / slots_total`.
+
+The allocator's own view is still available, in `paper.json`'s summary only, as
+`allocation_fill_ratio` and `allocation_unfilled_slots`. Both facts are worth having and
+the gap between them is exactly where questions are being lost — but the paper must not
+print the allocator's.
+
 Degraded body carries `status: "degraded"`, a `warnings` array safe to show verbatim, and
 no `downloads`. It also carries `items: []` where a successful body carries `items_count`
 — these two shapes are **not** the same key set, and a client that reads `items_count`

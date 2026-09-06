@@ -20,7 +20,7 @@ ran, so a paper is never presented as checked when the gate was skipped — the 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -40,6 +40,11 @@ class PaperResult:
     manifest: dict[str, Any]
     artifacts: Any
     blueprint: Blueprint
+    # The assembled paper, so the HTTP route reports the same delivered counts the
+    # document itself prints. Recomputing them beside `build_paper` is how the API
+    # came to answer `fill_ratio: 1.0, unfilled_slots: []` for a paper missing two
+    # of seven questions.
+    paper: dict[str, Any] = field(default_factory=dict)
 
     @property
     def status(self) -> str:
@@ -241,7 +246,7 @@ def generate_paper(
     stage("assembling", "done")
     return PaperResult(
         items=result.items, coverage=coverage, manifest=manifest,
-        artifacts=artifacts, blueprint=blueprint,
+        artifacts=artifacts, blueprint=blueprint, paper=paper,
     )
 
 

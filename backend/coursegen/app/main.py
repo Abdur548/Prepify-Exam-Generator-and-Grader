@@ -803,11 +803,18 @@ def _run_exam_pipeline(
     # counts matched nodes against the WHOLE corpus, so under an authored
     # blueprint it read 0.04 on a paper that was 20/20 items and 100/100 marks.
     # `fill_ratio` and `allocation_fidelity` are the honest headline numbers.
+    # Read off the assembled paper, not off the coverage report. These used to
+    # come from the allocator, so a run that placed all seven slots and then lost
+    # two at the gates answered `fill_ratio: 1.0` and `unfilled_slots: []` beside
+    # `items_count: 5` — a caller trusting the contract showed a clean paper.
+    # `paper["summary"]` now carries delivery, with the allocator's own view kept
+    # under `allocation_*` for anyone who wants the difference.
+    summary = result.paper.get("summary", {})
     return {
         "status": result.status,
-        "fill_ratio": result.coverage.fill_ratio,
+        "fill_ratio": summary.get("fill_ratio", result.coverage.fill_ratio),
         "allocation_fidelity": result.coverage.allocation_fidelity,
-        "unfilled_slots": result.coverage.unfilled_slots,
+        "unfilled_slots": summary.get("unfilled_slots", result.coverage.unfilled_slots),
         "items_count": len(result.items),
         "warnings": result.coverage.warnings,
         "downloads": {
