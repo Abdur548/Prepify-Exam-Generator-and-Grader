@@ -876,6 +876,15 @@ Build order (from the spec):
       mutation-verified, plus one opt-in live behavioural check.
       **Structural containment only.** Text inside a correctly-closed span can still say
       "ignore previous instructions"; that is model behaviour and is not solved here.
+      **Amended 2026-09-06 — this entry covered ONE of the two prompts.** The chat path
+      wraps the same third-party text in `<source>` and had no equivalent treatment for
+      five days; the independent evaluation found it (F5). The filename was a second way
+      in, since it is interpolated into an attribute and `_safe_upload_name` strips
+      directory components only. Both closed; the neutraliser now takes the tag as a
+      parameter so there is one implementation rather than two that drift. Note the
+      obvious fix — calling the existing neutraliser on chat text — is a NO-OP, measured,
+      and pinned by a test. 35 tests now, 6/6 mutations caught, and the guard alters 0 of
+      568 chunks of the real corpus.
 - [x] **DONE 2026-09-01** — reported per arm by `coursegen/eval/harness.py`, and the report
       warns when it drops below 0.7 (it fired on `final_default` at 0.66). Was: **🟠 `allocation_fidelity` reported for the solver arm** alongside coverage. 29/32/38%
       of placements come from span exhaustion; coverage alone credits the mass thesis for
