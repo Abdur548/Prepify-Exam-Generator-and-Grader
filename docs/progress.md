@@ -2909,3 +2909,110 @@ R2: *measure, do not reason about causes.* I had a plausible mechanism, a screen
 matched it, and a fix that appeared to work — and the appearance came from changing two
 things at once and looking at the wrong one. R10's "change one variable at a time, and
 prove the rest is unchanged" is the other half of the same lesson.
+
+---
+
+## 2026-09-06 — F1, F2, F3 from the independent evaluation
+
+Three severity-1 findings, fixed in the order the report recommended. Each was
+reproduced first, fixed, mutation-tested, then verified on a live run.
+
+### F1 — the answer key contradicted the paper
+
+`_shuffle_options` remapped `correct_option` and left `model_answer` naming the
+pre-shuffle position. Proven by inverting the shuffle permutation: **the model
+answered 4 of 4 correctly and the shuffle broke 3.**
+
+Remapping the letter would not have been enough, and is the fix most people would
+write. `model_answer` is free text the model fills inconsistently — a bare label,
+`"T"` on a true/false item, the option's full text. **6 of 10 MCQ answers on the
+shipped paper are not labels at all.** So it is derived from `correct_option`
+instead (R7). That partial fix is one of the mutations below, and it is caught.
+
+Live, on the surface the defect appeared on:
+
+```
+=== answer_key.html ===          === answer_key.pdf ===
+key says C -> 'C. The union…'    key=C  next='C. The union of the possible…'
+key says A -> 'A. What the …'    key=A  next='A. What the agent knows, use…'
+key says B -> 'B. To make t…'    key=B  next='B. To make the Q-Network sta…'
+key says D -> 'D. Human obs…'    key=D  next='D. Human observers may be ea…'
+4/4 agree   (was 3/4 disagreeing)
+```
+
+### F2 — the paper stated counts it did not deliver
+
+Built from the blueprint and the allocator, neither of which knows a slot was
+destroyed at a gate. `_section_instruction` was even passed the allocated count
+while its own docstring said it used the filled one.
+
+Live `quiz_default` run, 6 items of 7:
+
+```
+There are 6 questions in this paper.
+The paper carries 18 marks and allows 30 minutes.
+Section A — Multiple Choice Questions: 4 × 2 marks.
+Section B — Short Answer Questions: 2 × 5 marks.
+
+fill_ratio 0.857   unfilled ['A-03']          <- were 1.0 and []
+allocation_fill_ratio 1.0  allocation_unfilled []   <- kept, not dropped
+```
+
+Both facts are worth having and the gap between them is exactly where questions
+are being lost. The paper just must not print the allocator's.
+
+### F3 — synthesis items were cited on the printed paper
+
+The disclosure says they "carry no source"; `_EXAM_TEMPLATE` printed
+`Source: <file>, pages <n>` for every item unconditionally.
+
+Verified on a real 20-item paper regenerated **from the spec-hash cache — 20 hits,
+0 API calls**:
+
+```
+synthesis items: 8  ['B-01','C-01','C-02','C-03','C-04','D-01','D-02','D-03']
+sourced items  : 12
+
+exam.html : 12 "Source:" lines, 8 "asks you to build something new"
+exam.pdf  : 12 "Source:" lines, 8 "asks you to build something new"
+```
+
+### The mutation that mattered most
+
+Ten mutations applied, all caught — but three initially read **NOT CAUGHT**, and
+every one was an honest gap rather than a bad probe:
+
+- Two instruction mutations were invisible because every fixture had no gaps, so
+  "count the slots" and "count the delivered" agreed. That fixture exists now.
+- **The F3 wiring.** `render_exam_artifacts` cannot see `grounding`, so
+  suppressing the citation depends entirely on `pipeline.generate_paper` passing
+  the slot ids. Mutating that call to `set()` left every template test green and
+  put the citation straight back on the printed paper. That is the audit's own
+  "a guard is reported as present and is not", caught here rather than in
+  production, and it now has its own end-to-end test.
+
+### Cost and integrity
+
+One live `quiz_default` generation: **3 calls, ~7,979 tokens.** The 20-item
+synthesis paper cost nothing (cache). Everything ran against a sandboxed
+`DATA_DIR`/`OUTPUT_DIR` holding a *copy* of the corpus; the five irreplaceable
+artifacts match the evaluator's recorded hashes byte for byte afterwards.
+
+```
+course_map.json    490165  91e0677cf78e6add
+paper.json          36611  7b82d8152a94de57
+exam.pdf            20210  dfb955a8528d9cd1
+answer_key.pdf      19995  00da0b96f867a9fa
+run_manifest.json    2837  567551f82286b080
+```
+
+```
+$ python -m pytest -q
+606 passed, 9 skipped        (was 592 / 9)
+```
+
+### Still open from the evaluation
+
+F5 (the chat prompt never neutralises `</source>` — the injection hole closed on
+the generation side is open on the chat side) and the F4/F12/F13 cluster, where a
+guard is reported as present and is not. Sixteen findings remain untouched.
