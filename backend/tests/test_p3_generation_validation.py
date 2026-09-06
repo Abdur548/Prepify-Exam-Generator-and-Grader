@@ -412,6 +412,123 @@ class TestValidateGeneratedItems:
             f"key points at {correct.text!r}; the originally-correct text was 'Option A'"
         )
 
+    def test_the_answer_shown_agrees_with_the_key_after_shuffling(self) -> None:
+        """F1. The shuffle remapped `correct_option` and left `model_answer` naming
+        the pre-shuffle position.
+
+        `answer_key.pdf` printed "Correct option: C" and then "B" beneath it, with
+        an explanation naming a third option; `Paper.tsx` renders `model_answer`,
+        so that is the letter the student marks against. Measured on a real run:
+        the model answered 4 of 4 correctly and the shuffle broke 3 — the fourth
+        agreed only because its permutation left the answer in place.
+
+        Nothing in the 592-test suite asserted on `model_answer` after a shuffle,
+        which is why a green run said nothing about any of it.
+        """
+        _, validate_generated_items = _import_validate()
+        spec = _spec("A-01", "n1", "s1", item_type="mcq")
+        valid, issues, _g = validate_generated_items(
+            specs=[spec],
+            raw_items=[_mcq_item("A-01")],
+            span_text_by_id={"s1": "Source content."},
+            groundedness_scorer=lambda answer, source: 10.0,
+            embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        )
+        assert not issues
+        item = valid[0]
+        correct = next(o for o in item.options if o.label == item.correct_option)
+
+        assert item.model_answer.startswith(f"{item.correct_option}."), (
+            f"key says {item.correct_option!r}, answer shown is {item.model_answer!r}"
+        )
+        assert correct.text in item.model_answer, (
+            "the shown answer must name the option the key points at"
+        )
+
+    @pytest.mark.parametrize("emitted", ["A", "T", "Option A", "a", ""])
+    def test_the_answer_is_derived_whatever_the_model_emitted(self, emitted) -> None:
+        """Remapping would not have been enough.
+
+        `model_answer` is free text and the model fills it inconsistently — a bare
+        label on one run, "T" on a true/false item, the option's full text on
+        another. On the shipped 20-item paper 6 of 10 MCQ answers are not labels
+        at all, so a "remap it if it looks like a label" rule would silently do
+        nothing for most of them.
+        """
+        _, validate_generated_items = _import_validate()
+        raw = _mcq_item("A-01")
+        raw["model_answer"] = emitted
+
+        valid, issues, _g = validate_generated_items(
+            specs=[_spec("A-01", "n1", "s1", item_type="mcq")],
+            raw_items=[raw],
+            span_text_by_id={"s1": "Source content."},
+            groundedness_scorer=lambda answer, source: 10.0,
+            embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        )
+        assert not issues
+        item = valid[0]
+        correct = next(o for o in item.options if o.label == item.correct_option)
+        assert item.model_answer == f"{item.correct_option}. {correct.text}"
+
+    def test_shuffling_never_changes_which_answer_is_correct(self) -> None:
+        """The label moves; the answer does not. If the shuffle could change which
+        option is right, fixing the displayed letter would just be agreeing
+        confidently about the wrong thing."""
+        _, validate_generated_items = _import_validate()
+        for slot in ("A-01", "A-02", "A-03", "A-04", "A-05", "A-06"):
+            valid, issues, _g = validate_generated_items(
+                specs=[_spec(slot, "n1", "s1", item_type="mcq")],
+                raw_items=[_mcq_item(slot)],
+                span_text_by_id={"s1": "Source content."},
+                groundedness_scorer=lambda answer, source: 10.0,
+                embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+            )
+            assert not issues
+            item = valid[0]
+            correct = next(o for o in item.options if o.label == item.correct_option)
+            # "Option A" is what `_mcq_item` marks correct before the shuffle.
+            assert correct.text == "Option A", f"{slot}: shuffle moved the answer"
+
+    def test_the_rendered_answer_key_does_not_contradict_itself(self, tmp_path) -> None:
+        """The surface the defect was visible on. `render.py` prints
+        `correct_option` and `model_answer` on consecutive lines, so a
+        disagreement between them is printed in full to the student."""
+        from coursegen.contracts.coverage import CoverageReport
+        from coursegen.exam.render import render_exam_artifacts
+
+        _, validate_generated_items = _import_validate()
+        valid, _issues, _g = validate_generated_items(
+            specs=[_spec("A-01", "n1", "s1", item_type="mcq")],
+            raw_items=[_mcq_item("A-01")],
+            span_text_by_id={"s1": "Source content."},
+            groundedness_scorer=lambda answer, source: 10.0,
+            embedding_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        )
+        coverage = CoverageReport(
+            blueprint_id="bp", nodes_total=1, nodes_covered=1, coverage_ratio=1.0,
+            slots_total=1, slots_filled=1, fill_ratio=1.0, slots_by_mass=1,
+            slots_by_fallthrough=0, allocation_fidelity=1.0, mass_covered=1.0,
+            unfilled_slots=[], warnings=[], per_node=[],
+        )
+        artifacts = render_exam_artifacts(
+            items=valid, coverage_report=coverage, output_dir=tmp_path, title="T"
+        )
+        key = artifacts.answer_key_html.read_text(encoding="utf-8")
+        item = valid[0]
+        assert f"Correct option: {item.correct_option}" in key
+        assert item.model_answer in key
+        # The bug as the student met it: the line after "Correct option: C" was a
+        # bare "B". Read the two lines the template emits and require the answer
+        # line to name the same option the key line does.
+        lines = [ln.strip() for ln in key.splitlines()]
+        key_line = next(i for i, ln in enumerate(lines) if "Correct option:" in ln)
+        answer_line = lines[key_line + 1]
+        assert item.correct_option in answer_line, (
+            f"key line {lines[key_line]!r} is followed by {answer_line!r}, "
+            "which names a different option"
+        )
+
     def test_mcq_shuffle_varies_across_items(self) -> None:
         """
         Seeding a fresh Random with the bare constant gives EVERY question the same

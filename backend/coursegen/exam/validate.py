@@ -335,6 +335,27 @@ def _shuffle_options(item: GeneratedItem) -> GeneratedItem:
     data = item.model_dump()
     data["options"] = [o.model_dump() for o in relabelled]
     data["correct_option"] = new_correct
+    # `model_answer` is DERIVED, not carried. This is the field the answer key
+    # prints and the UI shows, and it is the one the student marks against.
+    #
+    # It used to survive the shuffle untouched, still naming the pre-shuffle
+    # position — so `answer_key.pdf` printed "Correct option: C" and then "B"
+    # beneath it, and the explanation named a third option again. Measured on a
+    # real run: the model answered 4 of 4 correctly and the shuffle broke 3 of
+    # them; the fourth agreed only because its permutation happened to leave the
+    # answer in place. A study tool whose key is wrong is worse than one with no
+    # key at all.
+    #
+    # Remapping it would not have been enough. `model_answer` is free text and
+    # the model fills it inconsistently — a bare label on one run, "T" for a
+    # true/false item, the option's full text on another (6 of 10 items on the
+    # shipped paper are not labels at all). A "remap it if it looks like a label"
+    # rule silently does nothing for the rest.
+    #
+    # So it is computed from `correct_option`, which is the field the hygiene
+    # gate validates and the renderer trusts. R7: stamp from code what the system
+    # already holds, rather than keeping a second copy that can drift.
+    data["model_answer"] = f"{new_correct}. {options[correct_old].text}"
     return GeneratedItem.model_validate(data)
 
 
