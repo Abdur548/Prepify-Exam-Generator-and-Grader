@@ -8,7 +8,26 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
+from coursegen import config
 from coursegen.llm.client import LLMClient, TokenBudget
+
+
+@pytest.fixture(autouse=True)
+def isolated_call_ledger(tmp_path, monkeypatch) -> Path:
+    """No test may spend the real daily call budget.
+
+    The day cap (F4) is enforced by a counter persisted under `OUTPUT_DIR`. A test
+    that makes a billable call without redirecting it would write the production
+    ledger, and the app would then refuse real calls until local midnight — a test
+    run silently costing the user their day. Not hypothetical: a mutation run that
+    made dry-runs billable put 4 calls in the real ledger before this existed.
+
+    Autouse, so isolation is the default rather than something each test has to
+    remember. Returns the path for tests that want to assert on it.
+    """
+    path = tmp_path / config.CALL_LEDGER_NAME
+    monkeypatch.setattr(config, "call_ledger_path", lambda: path)
+    return path
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

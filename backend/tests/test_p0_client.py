@@ -1,13 +1,23 @@
 """P0 gate tests: LLM client — budget guard, dry-run, retry cap, key redaction."""
 from __future__ import annotations
 
+import json
+from datetime import date, timedelta
+from pathlib import Path
+
 import pytest
 from unittest.mock import MagicMock, patch
 
 import httpx
 
 from coursegen import config
-from coursegen.llm.client import BudgetExceeded, LLMClient, TokenBudget, _redact
+from coursegen.llm.client import (
+    BudgetExceeded,
+    DailyCallLedger,
+    LLMClient,
+    TokenBudget,
+    _redact,
+)
 
 
 class TestTokenBudget:
@@ -157,3 +167,97 @@ class TestClientInit:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         client = LLMClient(dry_run=True)
         assert client._dry_run is True
+
+
+class TestTheDailyCallCapIsEnforced:
+    """F4: `PER_DAY_CALL_CAP` was defined, printed, assigned — and read by nothing.
+
+    The counter cannot live in memory. Every request builds a fresh `LLMClient()`
+    (`app/main.py`, `pipeline.py`), so `_calls_used` starts at 0 each time; the real
+    ceiling was 20 calls per generation and unbounded in aggregate. Meanwhile
+    `/api/chat` already told students they had reached "today's request limit".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ledger(self, isolated_call_ledger):
+        """`conftest.isolated_call_ledger` is autouse; this just names its path.
+
+        Isolation lives there rather than here so it protects every test, not only
+        the ones whose author remembered the real ledger exists.
+        """
+        self.ledger_path = isolated_call_ledger
+
+    def _billable_call(self, cap: int) -> None:
+        """One call through a BRAND NEW client, as a request would."""
+        budget = TokenBudget(per_day_call_cap=cap)
+        budget.check_call(10)
+        budget.record_call(10)
+
+    def test_the_cap_survives_a_fresh_client(self) -> None:
+        """The property F4 says could not work."""
+        for _ in range(3):
+            self._billable_call(cap=3)
+        with pytest.raises(BudgetExceeded, match="Daily call cap reached"):
+            self._billable_call(cap=3)
+
+    def test_the_count_is_on_disk_not_in_the_object(self) -> None:
+        self._billable_call(cap=10)
+        self._billable_call(cap=10)
+        assert json.loads(self.ledger_path.read_text())["calls"] == 2
+
+    def test_a_dry_run_does_not_spend_the_day(self) -> None:
+        """No request leaves the process, so no provider quota is consumed.
+
+        It still charges the per-exam counters — that is what makes a dry run a
+        rehearsal of the budget, and it is unchanged from before the day cap.
+        """
+        budget = TokenBudget(per_exam_call_cap=5, per_day_call_cap=5)
+        client = LLMClient(dry_run=True, budget=budget)
+        client.call([{"role": "user", "content": "hello"}])
+        assert budget.calls_used == 1, "the per-exam counter should still move"
+        assert not self.ledger_path.exists(), "a dry run wrote to the daily ledger"
+
+    def test_yesterdays_calls_are_not_spent_today(self) -> None:
+        self.ledger_path.write_text(json.dumps(
+            {"date": (date.today() - timedelta(days=1)).isoformat(), "calls": 9999}
+        ))
+        assert DailyCallLedger(self.ledger_path).calls_today() == 0
+        self._billable_call(cap=1)  # must not raise
+
+    def test_todays_calls_are_counted_today(self) -> None:
+        self.ledger_path.write_text(json.dumps(
+            {"date": date.today().isoformat(), "calls": 4}
+        ))
+        assert DailyCallLedger(self.ledger_path).calls_today() == 4
+
+    def test_a_corrupt_ledger_fails_open_rather_than_breaking_the_app(self) -> None:
+        """A disk problem must not take down a working application.
+
+        Failing open is the deliberate choice and it is logged, because a silently
+        inert cap is the defect being fixed here.
+        """
+        self.ledger_path.write_text("{ not json at all")
+        assert DailyCallLedger(self.ledger_path).calls_today() == 0
+        self._billable_call(cap=1)  # must not raise
+
+    def test_an_unwritable_ledger_does_not_lose_a_paid_call(self) -> None:
+        """The write happens AFTER a call that has already been paid for.
+
+        Raising there would throw away work the student is waiting on.
+        """
+        budget = TokenBudget(per_day_call_cap=100)
+        with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            budget.record_call(10)          # must not raise
+        assert budget.calls_used == 1
+
+    def test_the_missing_ledger_is_not_an_error(self) -> None:
+        assert not self.ledger_path.exists()
+        assert DailyCallLedger(self.ledger_path).calls_today() == 0
+
+    def test_the_per_exam_cap_still_fires_first(self) -> None:
+        """The day cap is added, not substituted. R10: the old guard is unchanged."""
+        budget = TokenBudget(per_exam_call_cap=1, per_day_call_cap=1000)
+        client = LLMClient(dry_run=True, budget=budget)
+        client.call([{"role": "user", "content": "first"}])
+        with pytest.raises(BudgetExceeded, match="Call cap reached"):
+            client.call([{"role": "user", "content": "second"}])

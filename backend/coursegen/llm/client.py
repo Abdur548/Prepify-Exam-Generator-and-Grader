@@ -8,6 +8,8 @@ import random
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -51,7 +53,78 @@ def _redact(text: str) -> str:
 
 
 class BudgetExceeded(Exception):
-    """Raised when a call would breach the per-exam call or token cap."""
+    """Raised when a call would breach the per-exam or per-day cap."""
+
+
+def _today() -> str:
+    return date.today().isoformat()
+
+
+@dataclass
+class DailyCallLedger:
+    """Calls made per calendar day, persisted because the counter cannot live in memory.
+
+    `PER_DAY_CALL_CAP` was defined on 2026-08-30 with a paragraph of rationale and
+    enforced nowhere: `check_call` tested the two per-exam caps and nothing read the
+    day cap at all (F4). It could not have worked in memory even if it had — every
+    request builds a fresh `LLMClient()` (`app/main.py`, `pipeline.py`), so
+    `_calls_used` starts at 0 each time. The ceiling was 20 calls per generation,
+    unbounded in aggregate, while the chat route was already telling students they
+    had reached "today's request limit" and it would reset.
+
+    ## What this counts, and what it does not
+
+    It counts calls THIS APPLICATION recorded, on the local calendar day. It is not
+    the provider's quota: it does not know about calls made from another machine,
+    another key, or outside this app, and local midnight is not the provider's reset
+    window. Treat a breach as "we have made 900 calls today", never as "the provider
+    will refuse the next one".
+
+    ## Failure is open, deliberately
+
+    A ledger that cannot be read reports 0 and a ledger that cannot be written logs
+    and returns. Failing closed would let a disk problem take down a working app,
+    and the write happens AFTER a call that has already been paid for — raising
+    there would throw away work the student is waiting on. Both paths log at
+    warning, because a silently inert cap is exactly the defect this fixes.
+
+    ## Concurrency
+
+    Read-modify-write with no lock. Safe in the shipped configuration and only
+    there: uvicorn runs single-worker (S8) and Qdrant's exclusive file lock stops
+    the CLI running beside the server. If either constraint is ever relaxed, two
+    writers can lose an increment and this needs a real lock.
+    """
+
+    path: Path
+
+    def _read(self) -> tuple[str, int]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return str(data.get("date", "")), int(data.get("calls", 0))
+        except FileNotFoundError:
+            return "", 0
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "Daily call ledger unreadable, treating today as 0 calls: %s", exc
+            )
+            return "", 0
+
+    def calls_today(self) -> int:
+        day, calls = self._read()
+        return calls if day == _today() else 0
+
+    def record(self) -> None:
+        day, calls = self._read()
+        calls = calls + 1 if day == _today() else 1
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps({"date": _today(), "calls": calls}), encoding="utf-8"
+            )
+        except OSError as exc:
+            logger.warning("Daily call ledger not written; the day cap is not being "
+                           "enforced for this call: %s", exc)
 
 
 @dataclass
@@ -59,9 +132,17 @@ class TokenBudget:
     per_exam_call_cap: int = config.PER_EXAM_CALL_CAP
     per_exam_token_cap: int = config.PER_EXAM_TOKEN_CAP
     per_day_call_cap: int = config.PER_DAY_CALL_CAP
+    # Resolved on first use, not here, so a test redirecting `config.OUTPUT_DIR`
+    # gets its own ledger instead of writing the real one.
+    ledger: DailyCallLedger | None = None
 
     _calls_used: int = field(default=0, init=False, repr=False)
     _tokens_used: int = field(default=0, init=False, repr=False)
+
+    def _get_ledger(self) -> DailyCallLedger:
+        if self.ledger is None:
+            self.ledger = DailyCallLedger(config.call_ledger_path())
+        return self.ledger
 
     def check_call(self, estimated_tokens: int) -> None:
         """Assert budget before sending. Raises BudgetExceeded — never loops silently."""
@@ -74,10 +155,24 @@ class TokenBudget:
                 f"Token cap would be exceeded: "
                 f"{self._tokens_used}+{estimated_tokens} > {self.per_exam_token_cap}"
             )
+        used_today = self._get_ledger().calls_today()
+        if used_today >= self.per_day_call_cap:
+            raise BudgetExceeded(
+                f"Daily call cap reached: {used_today}/{self.per_day_call_cap}"
+            )
 
-    def record_call(self, tokens_used: int) -> None:
+    def record_call(self, tokens_used: int, *, billable: bool = True) -> None:
+        """Charge one call.
+
+        `billable` is False only for a dry run, which reaches no provider and so
+        cannot consume a daily quota. It still charges the per-exam counters, which
+        is what makes a dry run a useful rehearsal of the budget — that behaviour is
+        unchanged from before the day cap existed.
+        """
         self._calls_used += 1
         self._tokens_used += tokens_used
+        if billable:
+            self._get_ledger().record()
 
     @property
     def calls_used(self) -> int:
@@ -124,7 +219,9 @@ class LLMClient:
 
         if self._dry_run:
             logger.info("[dry-run] estimated_tokens=%d", estimated)
-            self._budget.record_call(estimated)
+            # Not billable: no request leaves the process, so it cannot spend a day
+            # of provider quota. It still charges the per-exam counters.
+            self._budget.record_call(estimated, billable=False)
             return {"dry_run": True, "estimated_tokens": estimated}
 
         return self._call_with_retry(messages, response_schema, estimated)

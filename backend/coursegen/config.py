@@ -487,3 +487,26 @@ RETRY_MAX_DELAY_SECONDS: float = 30.0
 PER_EXAM_CALL_CAP: int = 20
 PER_EXAM_TOKEN_CAP: int = 60_000
 PER_DAY_CALL_CAP: int = int(os.getenv("PER_DAY_CALL_CAP", "900"))
+# Where the day's call count is persisted. A NAME rather than a full path, joined
+# to `OUTPUT_DIR` when it is used, so a test that redirects `OUTPUT_DIR` gets its
+# own ledger — a module-level `OUTPUT_DIR / ...` would bind the real one at import
+# and every test would write to it.
+#
+# Enforced from 2026-09-06. Before that `PER_DAY_CALL_CAP` was defined here,
+# printed by the eval CLI, assigned to a dataclass field and read by nothing
+# (F4) — while `/api/chat` already told students they had hit "today's request
+# limit". See `llm/client.py::DailyCallLedger` for what the number does and does
+# not mean.
+CALL_LEDGER_NAME: str = ".call_ledger.json"
+
+
+def call_ledger_path() -> Path:
+    """Resolved when called, never at import.
+
+    A function rather than a constant so both redirections work: production
+    follows `OUTPUT_DIR`, and `conftest.py` replaces this outright so no test can
+    spend the real day's budget. A module-level `OUTPUT_DIR / CALL_LEDGER_NAME`
+    would bind the real path at import and every test would write to it — which is
+    exactly what a mutation run did before this existed.
+    """
+    return OUTPUT_DIR / CALL_LEDGER_NAME
