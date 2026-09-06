@@ -23,3 +23,15 @@ dist-ssr
 *.sln
 *.sw?
 public/paper.json
+
+# Vite writes this transient file beside the config while loading a TS config,
+# and leaves it behind if the process dies. Regenerable, never meaningful.
+vite.config.ts.timestamp-*
+vitest.config.ts.timestamp-*
+
+# Only produced by `vitest run --coverage`, which is one flag away.
+coverage/
+
+# NOT listed, because measured 2026-09-06 and they cannot land here:
+# `tsconfig.*.json` already redirect tsBuildInfoFile into `node_modules/.tmp/`,
+# and Vite's cacheDir defaults to `node_modules/.vite` - both already ignored.

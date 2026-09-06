@@ -1,4 +1,13 @@
+# `.env` alone is an EXACT name match. It does not cover `.env.production`,
+# `.env.development` or `.env.test` — all of which Vite loads by convention and
+# python-dotenv is routinely pointed at. Measured 2026-09-06: `git check-ignore`
+# reported backend/.env.production and frontend/.env.production NOT IGNORED, i.e.
+# one `git add -A` away from a real key in a public repo (S1, S9).
 .env
+.env.*
+# The template is the one env file that belongs in the repo. It carries the KEY
+# NAMES and no values; keep it tracked, and keep the placeholder a placeholder.
+!.env.example
 *.egg-info/
 __pycache__/
 *.pyc
@@ -30,4 +39,7 @@ output/
 # If the §14.6 pre-baked demo collection is ever committed, do it deliberately with
 # `git add -f` after the S9 secret scan — never by relaxing this rule.
 data/
-!data/.gitkeep
+
+# Local agent settings: machine-specific paths and permission grants. Was covered
+# only by the user's global core.excludesFile, which no clone inherits.
+.agent/settings.local.json
