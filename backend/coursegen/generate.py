@@ -10,6 +10,12 @@ duplication gate, the route wired no progress output, and for a week the CLI was
 the only holder of the Qdrant span-read path. The sequence now lives in
 `coursegen/pipeline.py` and this is a thin front end onto it.
 
+That extraction fixed the SEQUENCE and left the COLLABORATORS duplicated, so the
+drift moved rather than stopped: this file still passed no `embedding_fn`, and
+went on reporting `duplication.skipped: true` on every run for another five days
+while the paragraph above said otherwise (F12, 2026-09-06). Both front ends now
+build their gate collaborators from the same functions.
+
 Two steps, deliberately separate. `--ingest` embeds a directory of course material
 (~10 minutes on CPU for 14 decks) and stops. Generation then runs against the
 persisted course map, so the expensive step is not repeated for every paper.
@@ -51,8 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--verify", action="store_true",
                     help="run the factuality gate (gate 5) — roughly doubles API cost")
     ap.add_argument("--no-gates", action="store_true",
-                    help="skip loading the cross-encoder; the relevance gate is "
-                         "then reported as skipped rather than passed")
+                    help="skip loading the cross-encoder and BGE-M3; the relevance "
+                         "and duplication gates are then reported as skipped "
+                         "rather than passed")
     args = ap.parse_args(argv)
 
     if args.ingest is not None:
@@ -68,17 +75,44 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     scorer = None
+    embedding_fn = None
     if not args.no_gates:
         from sentence_transformers import CrossEncoder
         print("Loading cross-encoder for the relevance gate …  (~40 s cold)")
         enc = CrossEncoder(config.RERANKER_MODEL)
         scorer = lambda answer, src: float(enc.predict([(answer, src)])[0])  # noqa: E731
 
+        # The duplication gate needs an embedder, and this front end never passed
+        # one — so every CLI run reported `duplication.skipped: true`, including
+        # the paper STATE.md cites as the system's one real end-to-end result. The
+        # module docstring above has claimed this was fixed since the pipeline
+        # extraction; it was not, until 2026-09-06 (F12).
+        from coursegen.app.preflight import _check_memory_headroom
+        from coursegen.ingest.embed import dense_embedding_fn, load_model
+
+        # Checked BEFORE the load, because running out of committable memory here
+        # is not an exception: BGE-M3's weights are memory-mapped, so loading
+        # succeeds and the process dies on the first forward pass with a Windows
+        # access violation. Nothing downstream can catch that, which is why the
+        # HTTP route checks it in preflight and why this path — new as of the F12
+        # fix — must not be the one place that skips it.
+        try:
+            _check_memory_headroom()
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            print("       Re-run with --no-gates to generate without the "
+                  "relevance and duplication gates.")
+            return 1
+
+        print("Loading BGE-M3 for the duplication gate …  (~40 s cold, ~4 GB)")
+        embedding_fn = dense_embedding_fn(load_model())
+
     try:
         result = generate_paper(
             blueprint_id=args.blueprint,
             title=args.title,
             groundedness_scorer=scorer,
+            embedding_fn=embedding_fn,
             verify=args.verify,
             progress=lambda m: print(f"  {m}"),
         )

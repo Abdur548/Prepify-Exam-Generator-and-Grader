@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 
@@ -36,6 +37,30 @@ def load_model() -> "BGEM3FlagModel":  # type: ignore[name-defined]
         use_fp16=(device != "cpu"),
         device=device,
     )
+
+
+def dense_embedding_fn(model: "BGEM3FlagModel") -> Callable[[list[str]], list[list[float]]]:  # type: ignore[name-defined]
+    """The `embedding_fn` the duplication gate takes, bound to a loaded model.
+
+    Lives here, beside the model, because it existed only as a closure inside
+    `app/main.py` and so only the HTTP route had one. The CLI passed no
+    `embedding_fn` at all and therefore reported `duplication.skipped: true` on
+    every run — including the 20-item paper `STATE.md` cites as the system's one
+    real end-to-end result, which shipped with two of four gates never run (F12).
+
+    `pipeline.py` was extracted to stop exactly this: two callers sequencing the
+    same stages and drifting. That fixed the sequence and left the collaborators
+    duplicated, so the drift moved rather than stopped. One function, two callers,
+    nothing left to drift.
+    """
+
+    def embedding_fn(texts: list[str]) -> list[list[float]]:
+        out = model.encode(
+            texts, return_dense=True, return_sparse=False, return_colbert_vecs=False
+        )
+        return [v.tolist() for v in out["dense_vecs"]]
+
+    return embedding_fn
 
 
 def embed_chunks(chunks: list[Chunk], model: "BGEM3FlagModel") -> EmbedResult:  # type: ignore[name-defined]

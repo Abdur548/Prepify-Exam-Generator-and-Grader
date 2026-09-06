@@ -785,11 +785,12 @@ def _run_exam_pipeline(
     except Exception:  # noqa: BLE001
         pass
 
-    def embedding_fn(texts: list[str]) -> list[list[float]]:
-        out = embed.encode(
-            texts, return_dense=True, return_sparse=False, return_colbert_vecs=False
-        )
-        return [v.tolist() for v in out["dense_vecs"]]
+    # Shared with the CLI rather than defined here. This closure was the only
+    # `embedding_fn` in the codebase, which is why only the route ran the
+    # duplication gate (F12).
+    from coursegen.ingest.embed import dense_embedding_fn
+
+    embedding_fn = dense_embedding_fn(embed)
 
     result = generate_paper(
         blueprint_id=blueprint_id,
