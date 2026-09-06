@@ -217,6 +217,10 @@ def generate_paper(
     manifest["factuality"] = factuality_summary
 
     artifacts = render_exam_artifacts(
+        # The printed paper must not cite a page for an item written to be
+        # answered by building something new — the disclosure the student accepted
+        # says, in as many words, that those "carry no source".
+        synthesis_slots={s.slot_id for s in specs if s.grounding == "synthesis"},
         items=result.items,
         coverage_report=coverage,
         output_dir=output_dir,

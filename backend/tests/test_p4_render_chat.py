@@ -143,6 +143,60 @@ class TestRenderArtifacts:
         assert "Correct option: C" in key_html
         assert "Correct option: A" not in key_html
 
+    def test_a_synthesis_item_is_not_given_a_source_line(self, tmp_path: Path) -> None:
+        """F3. The disclosure a student must accept before generating says, in as
+        many words, that synthesis questions "carry no source".
+
+        `_EXAM_TEMPLATE` printed `Source: <file>, pages <n>` for every item
+        unconditionally, so on the shipped 20-item paper all 8 synthesis items
+        carried a citation and were indistinguishable from the 12 grounded ones. A
+        student turning to `06_CSP.pdf` page 1 for C-02 finds nothing, and the
+        honest conclusion available to them is that their own notes are wrong.
+
+        The span is real — it was the CONTEXT the item was written against — which
+        is why the item has a `source_ref` at all and why suppressing it needs the
+        slot list rather than a null check.
+        """
+        _, render_exam_artifacts = _import_render()
+
+        def fake_pdf_writer(html: str, path: Path) -> None:
+            path.write_bytes(b"%PDF")
+
+        sourced, synthesis = _item(), _item()
+        sourced.slot_id, synthesis.slot_id = "A-01", "B-01"
+
+        result = render_exam_artifacts(
+            items=[sourced, synthesis], coverage_report=_coverage(),
+            output_dir=tmp_path, title="T", pdf_writer=fake_pdf_writer,
+            synthesis_slots={"B-01"},
+        )
+        exam = result.exam_html.read_text(encoding="utf-8")
+        key = result.answer_key_html.read_text(encoding="utf-8")
+
+        # One citation, for the one grounded item — not two.
+        assert exam.count("Source:") == 1, exam
+        assert key.count("Source:") == 1
+        # And the synthesis item says what the app says, rather than nothing at
+        # all: a silently missing line reads as a rendering bug.
+        assert "asks you to build something new" in exam
+        assert "asks you to build something new" in key
+
+    def test_every_item_is_cited_when_none_is_synthesis(self, tmp_path: Path) -> None:
+        """The counterpart. Suppressing the line for grounded items would remove
+        the provenance the whole product is built on."""
+        _, render_exam_artifacts = _import_render()
+        a, b = _item(), _item()
+        a.slot_id, b.slot_id = "A-01", "A-02"
+
+        result = render_exam_artifacts(
+            items=[a, b], coverage_report=_coverage(), output_dir=tmp_path,
+            title="T", pdf_writer=lambda html, path: path.write_bytes(b"%PDF"),
+            synthesis_slots=set(),
+        )
+        exam = result.exam_html.read_text(encoding="utf-8")
+        assert exam.count("Source:") == 2
+        assert "asks you to build something new" not in exam
+
     def test_weasyprint_preflight_raises_with_an_actionable_message(self) -> None:
         """
         The message is the whole point of the preflight: R8 wants a legible startup
@@ -371,3 +425,77 @@ class TestChatAnswer:
         assert result.citations == []
         assert "not from your material" in result.answer.lower()
         assert len(llm.calls) == 1
+
+
+class TestThePipelineTellsTheRendererWhichItemsAreSynthesis:
+    """The template can be correct and still print the wrong thing.
+
+    `render_exam_artifacts` cannot see `grounding` — it receives `GeneratedItem`s,
+    which do not carry it — so suppressing the citation depends entirely on
+    `pipeline.generate_paper` passing the slot ids. Mutating that call to `set()`
+    left every template test green while the printed paper went back to citing a
+    page for every synthesis item. This is the same shape as the audit's "a guard
+    is reported as present and is not", so it gets its own test rather than
+    trusting the wiring.
+    """
+
+    def test_a_synthesis_item_reaches_the_printed_paper_uncited(self, tmp_path, monkeypatch) -> None:
+        from unittest.mock import patch
+
+        from coursegen import config
+        from coursegen.contracts.blueprint import Blueprint, SectionSpec
+        from coursegen.contracts.coverage import CoverageReport
+        from coursegen.contracts.item import GeneratedItem, ItemSpec, SourceRef
+        from coursegen.exam.generate import GenerationResult
+        from coursegen.pipeline import generate_paper
+
+        blueprint = Blueprint(
+            blueprint_id="bp", title="T", total_marks=10, duration_minutes=30,
+            sections=[
+                SectionSpec(section_id="A", title="Recall", item_type="short",
+                            count=1, marks_each=5, bloom=["remember"]),
+                SectionSpec(section_id="B", title="Build", item_type="long",
+                            count=1, marks_each=5, bloom=["create"],
+                            grounding="synthesis"),
+            ],
+        )
+        specs = [
+            ItemSpec(slot_id="A-01", item_type="short", marks=5, bloom="remember",
+                     node_id="n1", span_ids=["c1"], eligibility=[], spec_hash="h1",
+                     grounding="span"),
+            ItemSpec(slot_id="B-01", item_type="long", marks=5, bloom="create",
+                     node_id="n1", span_ids=["c1"], eligibility=[], spec_hash="h2",
+                     grounding="synthesis"),
+        ]
+        items = [
+            GeneratedItem(slot_id=s.slot_id, stem=f"Q {s.slot_id}?",
+                          model_answer="answer", explanation="because",
+                          source_ref=SourceRef(file="deck.pdf", pages=[7]))
+            for s in specs
+        ]
+        coverage = CoverageReport(
+            blueprint_id="bp", nodes_total=1, nodes_covered=1, coverage_ratio=1.0,
+            slots_total=2, slots_filled=2, fill_ratio=1.0, slots_by_mass=2,
+            slots_by_fallthrough=0, allocation_fidelity=1.0, mass_covered=1.0,
+            unfilled_slots=[], warnings=[], per_node=[],
+        )
+
+        # OUTPUT_DIR redirected: generate_paper writes paper.json itself, and a
+        # test must not write into the product's own output directory.
+        monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path)
+        with patch("coursegen.pipeline.load_blueprint", return_value=blueprint), \
+             patch("coursegen.ingest.coursemap.load_course_map", return_value=[]), \
+             patch("coursegen.exam.allocate.solve", return_value=(specs, coverage)), \
+             patch("coursegen.ingest.index.read_spans", return_value=({"c1": "ctx"}, {})), \
+             patch("coursegen.exam.generate.generate_exam",
+                   return_value=GenerationResult(items=items, manifest={})), \
+             patch("coursegen.exam.render._write_pdf_with_weasyprint",
+                   side_effect=lambda html, path: path.write_bytes(b"%PDF")):
+            generate_paper(blueprint_id="bp", title="T", llm_client=object())
+
+        exam = (tmp_path / "exam.html").read_text(encoding="utf-8")
+        assert exam.count("Source:") == 1, (
+            "the synthesis item is cited on the printed paper, which the "
+            "disclosure told the student would not happen"
+        )
+        assert "asks you to build something new" in exam

@@ -41,7 +41,19 @@ def render_exam_artifacts(
     output_dir: Path,
     title: str,
     pdf_writer: PdfWriter | None = None,
+    synthesis_slots: set[str] | None = None,
 ) -> RenderArtifacts:
+    """Write the exam, the answer key and the coverage report.
+
+    `synthesis_slots` names the items written to be answered by building something
+    new. They have a span, but it is CONTEXT rather than the place the answer
+    lives, so the printed paper must not cite it — see `_EXAM_TEMPLATE`.
+
+    Optional, and defaulting to none, so every existing caller keeps working. The
+    cost of that is that a caller which forgets it prints the old, wrong line;
+    `pipeline.generate_paper` is the only caller that renders a real paper and it
+    passes them.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_writer = pdf_writer or _write_pdf_with_weasyprint
 
@@ -51,8 +63,9 @@ def render_exam_artifacts(
     exam_pdf = output_dir / "exam.pdf"
     key_pdf = output_dir / "answer_key.pdf"
 
-    exam_html_text = _render_exam_html(items, title)
-    key_html_text = _render_answer_key_html(items, title)
+    synthesis_slots = synthesis_slots or set()
+    exam_html_text = _render_exam_html(items, title, synthesis_slots)
+    key_html_text = _render_answer_key_html(items, title, synthesis_slots)
     coverage_html_text = _render_coverage_html(coverage_report, title)
 
     exam_html.write_text(exam_html_text, encoding="utf-8")
@@ -89,7 +102,7 @@ _EXAM_TEMPLATE = _ENV.from_string("""
 {% for option in item.options %}<li><strong>{{ option.label }}.</strong> {{ option.text }}</li>{% endfor %}
 </ol>
 {% endif %}
-<p class="source">Source: {{ item.source_ref.file }}, pages {{ item.source_ref.pages|join(', ') }}</p>
+{% if item.slot_id in synthesis_slots %}<p class="source">Not from your material — this question asks you to build something new.</p>{% else %}<p class="source">Source: {{ item.source_ref.file }}, pages {{ item.source_ref.pages|join(', ') }}</p>{% endif %}
 </section>
 {% endfor %}
 </body></html>
@@ -105,7 +118,7 @@ _KEY_TEMPLATE = _ENV.from_string("""
 {% if item.correct_option %}<p>Correct option: {{ item.correct_option }}</p>{% endif %}
 <p>{{ item.model_answer }}</p>
 <p>{{ item.explanation }}</p>
-<p>Source: {{ item.source_ref.file }}, pages {{ item.source_ref.pages|join(', ') }}</p>
+{% if item.slot_id in synthesis_slots %}<p>Not from your material — this question asks you to build something new.</p>{% else %}<p>Source: {{ item.source_ref.file }}, pages {{ item.source_ref.pages|join(', ') }}</p>{% endif %}
 </section>
 {% endfor %}
 </body></html>
@@ -134,12 +147,20 @@ _COVERAGE_TEMPLATE = _ENV.from_string("""
 """)
 
 
-def _render_exam_html(items: list[GeneratedItem], title: str) -> str:
-    return _EXAM_TEMPLATE.render(items=items, title=title)
+def _render_exam_html(
+    items: list[GeneratedItem], title: str, synthesis_slots: set[str] | None = None
+) -> str:
+    return _EXAM_TEMPLATE.render(
+        items=items, title=title, synthesis_slots=synthesis_slots or set()
+    )
 
 
-def _render_answer_key_html(items: list[GeneratedItem], title: str) -> str:
-    return _KEY_TEMPLATE.render(items=items, title=title)
+def _render_answer_key_html(
+    items: list[GeneratedItem], title: str, synthesis_slots: set[str] | None = None
+) -> str:
+    return _KEY_TEMPLATE.render(
+        items=items, title=title, synthesis_slots=synthesis_slots or set()
+    )
 
 
 def _render_coverage_html(report: CoverageReport, title: str) -> str:
