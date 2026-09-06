@@ -52,6 +52,20 @@ def new_gate_report() -> dict[str, dict[str, Any]]:
     one swallow the other. `evaluated` is then 0 by construction, which is the
     one case where the sum above is short of what reached the gate; `skipped`
     is what says why.
+
+    `from_cache` is the third way a gate can fail to see an item, and it was
+    invisible until 2026-09-06. Items served from the spec-hash cache never reach
+    validation — only `uncached_specs` is passed in — so a re-run of an identical
+    generation reported `duplication: {evaluated: 0, skipped: false}`, which reads
+    as "the gate ran and found nothing" for a paper where five of seven items
+    touched no gate at all (F13). That is precisely the conflation the paragraphs
+    above exist to prevent, arriving by a route they did not cover.
+
+    Cached items are not re-gated, deliberately: only items that PASSED are ever
+    written to the cache, and re-running the per-item gates would re-shuffle an
+    already-shuffled MCQ and change the paper on every run. What they now do is
+    seed the duplication gate's comparison set, because that gate is the one that
+    is cross-item — see `validate_generated_items`.
     """
     return {
         gate: {
@@ -60,6 +74,10 @@ def new_gate_report() -> dict[str, dict[str, Any]]:
             "failed": 0,
             "skipped": False,
             "not_applicable": 0,
+            # Items in this paper the gate did not evaluate on THIS run because
+            # they came from cache. Never folded into `passed`: they cleared the
+            # gate on an earlier run, under whatever thresholds applied then.
+            "from_cache": 0,
         }
         for gate in ("schema", "relevance", "duplication", "mcq_hygiene")
     }
@@ -71,6 +89,7 @@ def validate_generated_items(
     span_text_by_id: dict[str, str],
     groundedness_scorer: GroundednessScorer | None = None,
     embedding_fn: EmbeddingFn | None = None,
+    prior_items: list[GeneratedItem] | None = None,
 ) -> tuple[list[GeneratedItem], list[ValidationIssue], dict[str, dict[str, Any]]]:
     """
     Run the four validation gates. Returns accepted items, the issues raised, and a
@@ -79,14 +98,38 @@ def validate_generated_items(
     `groundedness_scorer` and `embedding_fn` are injected so the default test run
     stays fast and network-free. When either is absent its gate is marked `skipped`
     in the report rather than silently contributing zero failures.
+
+    ## `prior_items` — items already accepted, that this batch must not duplicate
+
+    Items already in the paper: served from the spec-hash cache, or accepted by an
+    earlier pass of this same run. They are NOT re-gated and NOT returned; they
+    seed the duplication gate's comparison set and are counted as `from_cache`.
+
+    Three of the four gates are per-item, and a cached item passed them when it was
+    written — only accepted items are ever cached. Duplication is the exception: it
+    is the one CROSS-item gate, so judging a batch against only itself was wrong in
+    two ways at once (F13). A newly generated item was never compared against a
+    cached one, and a regenerated item was never compared against anything accepted
+    in the first pass, because each call started with an empty comparison set.
+
+    Re-gating them instead would be worse than useless: `_shuffle_options` mutates
+    the item, so a cached MCQ would be shuffled a second time and the paper would
+    change on every run — destroying the byte-identical re-generation the cache
+    exists to provide.
     """
     spec_by_slot = {s.slot_id: s for s in specs}
     issues: list[ValidationIssue] = []
     parsed: list[tuple[ItemSpec, GeneratedItem]] = []
+    prior_items = prior_items or []
 
     gates = new_gate_report()
     gates["relevance"]["skipped"] = groundedness_scorer is None
     gates["duplication"]["skipped"] = embedding_fn is None
+    # `from_cache` is NOT derived from `prior_items` here. The rewrite pass is also
+    # given prior items — everything accepted so far, most of which was generated
+    # this run, not restored from cache — so counting them here would report
+    # first-pass items as cached. Only `generate_exam` knows the cache count, and
+    # it stamps the finished report.
 
     def record(gate: str, ok: bool) -> None:
         gates[gate]["evaluated"] += 1
@@ -123,6 +166,14 @@ def validate_generated_items(
     accepted: list[GeneratedItem] = []
     accepted_texts: list[str] = []
     accepted_embeddings: list[list[float]] = []
+
+    # Seed the duplication comparison set with what is already in the paper, so a
+    # new item is judged against the WHOLE paper rather than against its own batch.
+    # Embedding is local (BGE-M3), so this costs CPU and no API quota.
+    if embedding_fn is not None and prior_items:
+        prior_texts = [f"{i.stem}\n{i.model_answer}" for i in prior_items]
+        accepted_texts.extend(prior_texts)
+        accepted_embeddings.extend(embedding_fn(prior_texts))
 
     for spec, item in parsed:
         source = "\n".join(span_text_by_id[sid] for sid in spec.span_ids)

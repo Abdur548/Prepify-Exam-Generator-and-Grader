@@ -80,12 +80,18 @@ def generate_exam(
         if on_progress else None,
     )
     _stamp_source_refs(raw_items, uncached_specs, span_source_by_id)
+    # Cached items are in the paper and must be part of the duplication
+    # comparison, or a new item is only ever judged against its own batch: with 5
+    # of 7 slots cached, the gate compared 2 items and reported the paper clean
+    # (F13). They are not re-gated — see `validate_generated_items`.
+    cached_items = [items_by_slot[s.slot_id] for s in specs if s.slot_id in items_by_slot]
     valid, issues, gates = validate_generated_items(
         specs=uncached_specs,
         raw_items=raw_items,
         span_text_by_id=span_text_by_id,
         groundedness_scorer=groundedness_scorer,
         embedding_fn=embedding_fn,
+        prior_items=cached_items,
     )
     for item in valid:
         spec = _spec_for_slot(uncached_specs, item.slot_id)
@@ -103,12 +109,20 @@ def generate_exam(
             if on_progress else None,
         )
         _stamp_source_refs(regen_raw, regen_specs, span_source_by_id)
+        # Everything accepted so far, cached and first-pass alike. Without it the
+        # rewrite pass started with an empty comparison set, so a regenerated item
+        # was never checked against anything the first pass had already accepted —
+        # the same cross-item blind spot as the cache, by a second route.
+        accepted_so_far = [
+            items_by_slot[s.slot_id] for s in specs if s.slot_id in items_by_slot
+        ]
         regen_valid, regen_issues, regen_gates = validate_generated_items(
             specs=regen_specs,
             raw_items=regen_raw,
             span_text_by_id=span_text_by_id,
             groundedness_scorer=groundedness_scorer,
             embedding_fn=embedding_fn,
+            prior_items=accepted_so_far,
         )
         gates = _merge_gate_reports(gates, regen_gates)
         for item in regen_valid:
@@ -118,6 +132,13 @@ def generate_exam(
         fixed = {item.slot_id for item in regen_valid}
         flagged_slots = sorted((set(flagged_slots) - fixed) | {i.slot_id for i in regen_issues})
         issues.extend(regen_issues)
+
+    # Stamped from the run, not inferred inside the gates. Until this existed, a
+    # re-run of an identical generation reported `duplication: {evaluated: 0,
+    # skipped: false}` — indistinguishable from "the gate ran and cleared the
+    # paper" for a paper where 5 of 7 items touched no gate at all (F13).
+    for gate in gates.values():
+        gate["from_cache"] = cache_hits
 
     ordered_items = [items_by_slot[s.slot_id] for s in specs if s.slot_id in items_by_slot]
     call_count_after = getattr(llm_client.budget, "calls_used", 0)
@@ -374,5 +395,10 @@ def _merge_gate_reports(
             "failed": a["failed"] + b.get("failed", 0),
             "skipped": bool(a["skipped"] and b.get("skipped", True)),
             "not_applicable": a["not_applicable"] + b.get("not_applicable", 0),
+            # Does NOT add. It counts items in the paper that came from cache, which
+            # is a property of the paper and not of how many passes ran over it.
+            # `generate_exam` stamps the real number after merging; max keeps the
+            # key from being dropped if either side already carries one.
+            "from_cache": max(a.get("from_cache", 0), b.get("from_cache", 0)),
         }
     return merged

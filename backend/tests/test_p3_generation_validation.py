@@ -558,3 +558,276 @@ class TestValidateGeneratedItems:
         assert len(answer_positions) > 1, (
             f"the correct answer sits at the same position on every item: {answer_positions}"
         )
+
+
+# ---------------------------------------------------------------------------
+# F13 — cached items bypass every gate, and the manifest called that a clean run.
+# ---------------------------------------------------------------------------
+
+def _orthogonal_embedder():
+    """Same ANSWER -> cosine 1.0; different answer -> 0.0. DEDUP_TAU is 0.85.
+
+    The gate embeds `f"{stem}\\n{model_answer}"`, and every helper here builds the
+    stem from the slot id, so two items saying the same thing never have identical
+    text. Keying on the answer is the smallest stand-in for the semantic similarity
+    a real embedder supplies — an exact-text-match fake would report every item
+    distinct and quietly assert nothing.
+
+    Deterministic and local: no model, no quota.
+    """
+    seen: dict[str, int] = {}
+
+    def embedding_fn(texts: list[str]) -> list[list[float]]:
+        out = []
+        for t in texts:
+            answer = t.split("\n", 1)[1] if "\n" in t else t
+            idx = seen.setdefault(answer, len(seen))
+            vec = [0.0] * 64
+            vec[idx % 64] = 1.0
+            out.append(vec)
+        return out
+
+    return embedding_fn
+
+
+def _cache(cache_dir: Path, spec: ItemSpec, item: dict[str, Any]) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / f"{spec.spec_hash}.json").write_text(
+        json.dumps(item), encoding="utf-8"
+    )
+
+
+class TestTheManifestSaysWhatTheGatesDidNotSee:
+    """The reporting half of F13.
+
+    Re-running an identical generation reported
+    `duplication: {evaluated: 0, skipped: false}` — which reads as "the gate ran
+    and found nothing" for a paper where every item came from cache and touched no
+    gate at all. That is exactly the conflation `new_gate_report`'s docstring
+    exists to prevent, arriving by a route it did not cover.
+    """
+
+    def test_a_fully_cached_run_reports_the_items_it_did_not_gate(self, tmp_path) -> None:
+        _, generate_exam = _import_generate()
+        specs = [_spec("A-01", "n1", "s1"), _spec("A-02", "n1", "s1")]
+        cache_dir = tmp_path / "cache"
+        for spec in specs:
+            _cache(cache_dir, spec, _item(spec.slot_id, answer=f"Answer {spec.slot_id}"))
+
+        result = generate_exam(
+            specs=specs, course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            llm_client=FakeLLMClient([]), output_dir=tmp_path,
+            cache_dir=cache_dir, blueprint_id="midterm_default",
+            embedding_fn=_orthogonal_embedder(),
+        )
+
+        gates = result.manifest["validation"]
+        assert result.manifest["cache_hits"] == 2
+        for name, gate in gates.items():
+            assert gate["evaluated"] == 0, f"{name} claims to have evaluated an item"
+            assert gate["from_cache"] == 2, (
+                f"{name} does not say the 2 items came from cache — "
+                f"'evaluated 0, skipped false' reads as a clean gate"
+            )
+
+    def test_from_cache_is_zero_when_nothing_was_cached(self, tmp_path) -> None:
+        _, generate_exam = _import_generate()
+        spec = _spec("A-01", "n1", "s1")
+        result = generate_exam(
+            specs=[spec], course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            llm_client=FakeLLMClient([[_item("A-01")]]), output_dir=tmp_path,
+            cache_dir=tmp_path / "cache", blueprint_id="midterm_default",
+        )
+        assert all(g["from_cache"] == 0 for g in result.manifest["validation"].values())
+
+    def test_from_cache_counts_the_paper_not_the_passes(self, tmp_path) -> None:
+        """It must not add across the initial and rewrite passes.
+
+        `_merge_gate_reports` adds `evaluated`, `passed`, `failed` and
+        `not_applicable` because those count evaluations. `from_cache` counts
+        ITEMS in the paper, so adding it would double-report a cached item the
+        moment a rewrite pass ran.
+        """
+        _, generate_exam = _import_generate()
+        cached, fresh = _spec("A-01", "n1", "s1"), _spec("A-02", "n1", "s1")
+        cache_dir = tmp_path / "cache"
+        _cache(cache_dir, cached, _item("A-01", answer="Cached answer"))
+
+        # The fresh item duplicates the cached one, so it is flagged and a rewrite
+        # pass runs — which is what would double-count.
+        result = generate_exam(
+            specs=[cached, fresh], course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            llm_client=FakeLLMClient([
+                [_item("A-02", answer="Cached answer")],
+                [_item("A-02", answer="A different answer")],
+            ]),
+            output_dir=tmp_path, cache_dir=cache_dir,
+            blueprint_id="midterm_default",
+            embedding_fn=_orthogonal_embedder(),
+        )
+        assert result.manifest["regeneration_passes"] == 1, "no rewrite pass ran"
+        assert result.manifest["validation"]["duplication"]["from_cache"] == 1
+
+
+class TestANewItemIsJudgedAgainstTheWholePaper:
+    """The substantive half of F13, and the reason reporting alone was not enough.
+
+    Duplication is the one CROSS-item gate. Judging a batch against only itself
+    meant a newly generated item was never compared with a cached one — with 5 of
+    7 slots cached, the gate compared 2 items and called the paper clean.
+    """
+
+    def test_an_item_duplicating_a_cached_one_is_caught(self, tmp_path) -> None:
+        _, generate_exam = _import_generate()
+        cached, fresh = _spec("A-01", "n1", "s1"), _spec("A-02", "n1", "s1")
+        cache_dir = tmp_path / "cache"
+        _cache(cache_dir, cached, _item("A-01", answer="Identical answer"))
+
+        result = generate_exam(
+            specs=[cached, fresh], course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            # Both attempts duplicate the cached item, so it can never be accepted.
+            llm_client=FakeLLMClient([
+                [_item("A-02", answer="Identical answer")],
+                [_item("A-02", answer="Identical answer")],
+            ]),
+            output_dir=tmp_path, cache_dir=cache_dir,
+            blueprint_id="midterm_default",
+            embedding_fn=_orthogonal_embedder(),
+        )
+
+        assert result.manifest["validation"]["duplication"]["failed"] >= 1, (
+            "a new item identical to a cached one was accepted"
+        )
+        assert [i.slot_id for i in result.items] == ["A-01"]
+
+    def test_a_distinct_item_still_passes(self, tmp_path) -> None:
+        """The guard must not reject everything — R4's lesson about thresholds."""
+        _, generate_exam = _import_generate()
+        cached, fresh = _spec("A-01", "n1", "s1"), _spec("A-02", "n1", "s1")
+        cache_dir = tmp_path / "cache"
+        _cache(cache_dir, cached, _item("A-01", answer="One answer"))
+
+        result = generate_exam(
+            specs=[cached, fresh], course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            llm_client=FakeLLMClient([[_item("A-02", answer="A quite different answer")]]),
+            output_dir=tmp_path, cache_dir=cache_dir,
+            blueprint_id="midterm_default",
+            embedding_fn=_orthogonal_embedder(),
+        )
+        assert sorted(i.slot_id for i in result.items) == ["A-01", "A-02"]
+        assert result.manifest["validation"]["duplication"]["failed"] == 0
+
+
+class TestCachedItemsAreNotReGated:
+    """The regression the obvious fix would have caused.
+
+    Re-validating cached items looks like the tidy answer and is wrong:
+    `_shuffle_options` MUTATES the item, and the cache holds post-shuffle items.
+    Running them through again would shuffle a second time, so an identical
+    re-generation would produce a different paper every run — destroying the
+    byte-identical property the cache exists to provide.
+    """
+
+    def test_a_cached_mcq_comes_back_unchanged(self, tmp_path) -> None:
+        _, generate_exam = _import_generate()
+        spec = _spec("A-01", "n1", "s1", item_type="mcq")
+        cache_dir = tmp_path / "cache"
+        cached_item = _mcq_item("A-01")
+        _cache(cache_dir, spec, cached_item)
+
+        result = generate_exam(
+            specs=[spec], course_map=[_node("n1", "s1")],
+            span_text_by_id={"s1": "Source content."},
+            llm_client=FakeLLMClient([]), output_dir=tmp_path,
+            cache_dir=cache_dir, blueprint_id="midterm_default",
+            embedding_fn=_orthogonal_embedder(),
+        )
+
+        item = result.items[0]
+        assert [o.label for o in item.options] == ["A", "B", "C", "D"]
+        assert [o.text for o in item.options] == [f"Option {c}" for c in "ABCD"]
+        assert item.correct_option == cached_item["correct_option"]
+
+    def test_the_same_run_twice_gives_the_same_paper(self, tmp_path) -> None:
+        """The property the evaluation recorded as a real strength. It must survive."""
+        _, generate_exam = _import_generate()
+        spec = _spec("A-01", "n1", "s1", item_type="mcq")
+        cache_dir = tmp_path / "cache"
+
+        def run(client):
+            return generate_exam(
+                specs=[spec], course_map=[_node("n1", "s1")],
+                span_text_by_id={"s1": "Source content."},
+                llm_client=client, output_dir=tmp_path,
+                cache_dir=cache_dir, blueprint_id="midterm_default",
+                embedding_fn=_orthogonal_embedder(),
+            )
+
+        first = run(FakeLLMClient([[_mcq_item("A-01")]]))
+        second = run(FakeLLMClient([]))          # fully cached, no calls left
+        assert second.manifest["cache_hits"] == 1
+        assert first.items[0].model_dump() == second.items[0].model_dump()
+
+
+class TestMergingTwoPassesKeepsTheCacheCountHonest:
+    """`_merge_gate_reports` is tested directly, because nothing else can reach it.
+
+    `generate_exam` stamps `from_cache` AFTER merging, so a merge that got this
+    wrong would be invisible end-to-end — a mutation making it add across passes
+    was NOT CAUGHT by any pipeline-level test. Either the merge stops carrying the
+    key and silently drops it, or it carries it correctly and is asserted here.
+    """
+
+    def _report(self, **overrides):
+        from coursegen.exam.validate import new_gate_report
+
+        report = new_gate_report()
+        for gate in report.values():
+            gate.update(overrides)
+        return report
+
+    def test_evaluation_counts_add(self) -> None:
+        from coursegen.exam.generate import _merge_gate_reports
+
+        merged = _merge_gate_reports(
+            self._report(evaluated=2, passed=2, not_applicable=1),
+            self._report(evaluated=3, passed=1, failed=2, not_applicable=4),
+        )
+        assert merged["schema"]["evaluated"] == 5
+        assert merged["schema"]["passed"] == 3
+        assert merged["schema"]["failed"] == 2
+        assert merged["schema"]["not_applicable"] == 5
+
+    def test_the_cache_count_does_not_add(self) -> None:
+        """It counts ITEMS in the paper, not evaluations of them.
+
+        Two passes over a paper with 3 cached items is still 3 cached items.
+        Adding would report 6 and make the manifest self-contradictory against
+        `cache_hits`.
+        """
+        from coursegen.exam.generate import _merge_gate_reports
+
+        merged = _merge_gate_reports(
+            self._report(from_cache=3), self._report(from_cache=3)
+        )
+        assert merged["schema"]["from_cache"] == 3
+
+    def test_the_cache_count_is_never_dropped(self) -> None:
+        from coursegen.exam.generate import _merge_gate_reports
+
+        merged = _merge_gate_reports(self._report(from_cache=2), self._report())
+        assert merged["duplication"]["from_cache"] == 2
+
+    def test_skipped_is_anded_not_added(self) -> None:
+        """A gate is skipped for the run only if it ran in neither pass."""
+        from coursegen.exam.generate import _merge_gate_reports
+
+        both = _merge_gate_reports(self._report(skipped=True), self._report(skipped=True))
+        one = _merge_gate_reports(self._report(skipped=True), self._report(skipped=False))
+        assert both["relevance"]["skipped"] is True
+        assert one["relevance"]["skipped"] is False

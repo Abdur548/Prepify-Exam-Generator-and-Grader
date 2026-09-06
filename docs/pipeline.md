@@ -244,6 +244,22 @@ tune it by watching the demo.
   `evaluated + not_applicable == items that reached it`. "We could not check" and "there is
   nothing to check against" are not the same thing, and collapsing them would hide the second,
   which is the more important one.
+- **`from_cache` is the third way a gate can fail to see an item** (added 2026-09-06, F13). Items
+  restored from the spec-hash cache never reach validation — only uncached specs are passed in —
+  so an identical re-run reported `duplication: {evaluated: 0, skipped: false}`, which reads as
+  "the gate ran and cleared the paper" for a paper where five of seven items touched no gate at
+  all. It is an int about ITEMS, stamped from the run's `cache_hits`, and it is never folded into
+  `passed`: those items cleared the gate on an earlier run, under whatever thresholds applied
+  then. It does not add across the initial and rewrite passes, because it counts items in the
+  paper rather than evaluations of them.
+- **Cached items are not re-gated, but they do join the duplication comparison.** Three gates are
+  per-item and a cached item passed them when it was written — only accepted items are cached.
+  Duplication is the one CROSS-item gate, so judging a batch against only itself was wrong twice
+  over: a new item was never compared against a cached one, and a regenerated item was never
+  compared against anything the first pass had accepted. Both now seed the comparison set.
+  Re-running the per-item gates instead would be actively harmful — `_shuffle_options` mutates
+  the item, so a cached MCQ would shuffle a second time and an identical re-generation would
+  produce a different paper every run.
 - **Grounding mode (`ItemSpec.grounding`, Amendment 01 §6.4).** `"span"` is the default and the
   existing product: the item is written FROM its span and gate 2 scores it for relevance to that span.
   `"synthesis"` means the model INVENTS the artifact — a novel game tree, a novel word problem —

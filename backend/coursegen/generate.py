@@ -96,6 +96,13 @@ def main(argv: list[str] | None = None) -> int:
         # access violation. Nothing downstream can catch that, which is why the
         # HTTP route checks it in preflight and why this path — new as of the F12
         # fix — must not be the one place that skips it.
+        #
+        # It reads AFTER the cross-encoder load and that is the point, not an
+        # oversight. The cross-encoder takes ~1.3 GB, so a machine reading 4.7 GB
+        # free before it reads 3.4 GB after — and 3.4 GB is the number that decides
+        # whether BGE-M3 survives. Measured on this machine 2026-09-06: checking
+        # first would have PASSED at 4.73 GB and then hard-killed the process.
+        # Moving it earlier trades a 40-second wait for an uncatchable crash.
         try:
             _check_memory_headroom()
         except RuntimeError as exc:

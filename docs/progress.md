@@ -3171,3 +3171,177 @@ compared against a running count (confirmed 2026-09-06: one assignment, zero
 comparisons); the CLI never wires the duplication gate; cached items bypass every
 gate while the manifest reports the gate ran and found nothing. Fifteen findings
 remain untouched.
+
+---
+
+## 2026-09-06 — F4, F12, F13: three guards that were reported and did not run
+
+One theme. Each was described somewhere — in config, in a docstring, in the
+manifest — as doing something it did not do.
+
+### F4 — the daily call cap was never compared against anything
+
+`PER_DAY_CALL_CAP` was defined with a paragraph of rationale, printed by the eval
+CLI, assigned to a dataclass field, and read by nothing. Confirmed independently
+rather than taken from the report: one assignment, zero comparisons.
+
+It could not have worked in memory. Every request builds a fresh `LLMClient()`, so
+`_calls_used` starts at 0 each time — the real ceiling was 20 calls per generation
+and unbounded in aggregate. Meanwhile `/api/chat` was already telling students they
+had reached "today's request limit" and that it would reset. The product had
+shipped the promise without the mechanism, which is what settled implement-vs-delete.
+
+`DailyCallLedger` persists the count. Proven across fresh clients — the property
+the finding says is impossible:
+
+```
+cap = 3
+call 1: allowed   ledger now 1 on 2026-09-06     <- a NEW client each time,
+call 2: allowed   ledger now 2 on 2026-09-06        exactly as a request builds one
+call 3: allowed   ledger now 3 on 2026-09-06
+call 4: REFUSED   Daily call cap reached: 3/3
+call 5: REFUSED   Daily call cap reached: 3/3
+ENFORCED ACROSS FRESH CLIENTS: True
+
+dry run: ledger 3 -> 3   NOT CHARGED: True
+yesterday's 9999 calls seen as today: 0   ROLLS OVER: True
+corrupt ledger reads as: 0 (fails open, logged)
+```
+
+**What it counts**: calls THIS APP made, on the local calendar day. Not the
+provider's quota — it knows nothing about other machines or keys, and local
+midnight is not the provider's reset window. Said plainly in the docstring and in
+`.env.example`, which had described the cap as reported-not-enforced.
+
+**A hazard the fix created, and the guard for it.** A test making a billable call
+without isolation would write the production ledger and the app would then refuse
+real calls until midnight — a test run costing the user their day. Not
+hypothetical: a mutation run put 4 calls in the real ledger before the guard
+existed. `config.call_ledger_path()` is a function so `conftest.py` can replace it
+autouse; the same mutation now leaves the real ledger untouched.
+
+6/6 mutations caught.
+
+### F12 — the CLI never wired the duplication gate
+
+```
+$ grep -c "embedding_fn" coursegen/generate.py
+0
+```
+
+Every CLI run reported `duplication.skipped: true`. The consequence is in the
+repo: `backend/output/run_manifest.json`, the flagship 20-item paper, records
+`duplication` and `relevance` both `skipped: true`. **Two of four gates never ran
+on the evidence paper.**
+
+The file's own docstring had described this as fixed since the pipeline
+extraction. That extraction fixed the SEQUENCE and left the COLLABORATORS
+duplicated, so the drift moved rather than stopped. `dense_embedding_fn` now lives
+in `ingest/embed.py` and both front ends call it. The route's behaviour is
+unchanged — same encode arguments, same return value, checked against the old
+inline closure rather than assumed.
+
+There were **no tests over the CLI at all**, which is how a docstring could
+describe a fix that was never made.
+
+5/5 mutations caught.
+
+### F13 — cached items bypassed every gate, reported as a clean run
+
+Two defects, not one.
+
+**Reporting.** Cached items never reach validation, so a re-run reported
+`duplication: {evaluated: 0, skipped: false}` — the exact "cleared everything" vs
+"never ran" conflation `new_gate_report` exists to prevent, arriving by a route it
+did not cover. `from_cache` now records it.
+
+**Substance, which reporting alone would not have fixed.** Duplication is the one
+CROSS-item gate. Judging a batch against only itself meant a new item was never
+compared with a cached one — and, found while fixing it, a REGENERATED item was
+never compared with anything the first pass had accepted, because each call started
+with an empty comparison set. Both now seed it.
+
+**The tempting fix would have broken the cache.** Re-validating cached items looks
+tidy and is wrong: `_shuffle_options` MUTATES the item and the cache holds
+post-shuffle items, so they would shuffle again and an identical re-generation
+would produce a different paper every run — destroying the byte-identical property
+the evaluation recorded as a real strength. Pinned by a test.
+
+### The live run — both fixes, through the real CLI
+
+Sandboxed copy of the corpus, `quiz_default`, 6 of 7 slots already cached:
+
+```
+=== MANIFEST ===
+cache_hits : 6
+call_count : 1
+tokens     : 944
+validation:
+  duplication  evaluated=1  passed=1  failed=0  n/a=0  from_cache=6  skipped=False
+  mcq_hygiene  evaluated=1  passed=1  failed=0  n/a=0  from_cache=6  skipped=False
+  relevance    evaluated=1  passed=1  failed=0  n/a=0  from_cache=6  skipped=False
+  schema       evaluated=1  passed=1  failed=0  n/a=0  from_cache=6  skipped=False
+```
+
+`duplication skipped=False` is F12 — no CLI run had ever produced that.
+`from_cache=6` is F13 — the manifest now says six items were not gated this run.
+
+**What that run did NOT establish.** BGE-M3 needs 4.0 GB of committable memory and
+this machine had ~3.4 GB free once the cross-encoder was loaded, so the real
+weights could not run. Only the weights were substituted, by a deterministic
+stand-in: `dense_embedding_fn`, the CLI, the pipeline, Qdrant span reads, the
+cache, the gates and the manifest were all real. The run establishes WIRING and
+REPORTING, not embedding quality.
+
+That memory condition is itself live evidence for a guard added with F12: the CLI
+generation path had never loaded BGE-M3 before, and that load is not a normal
+failure — the weights are memory-mapped, so it succeeds and the process dies on
+the first forward pass with a Windows access violation, uncatchable. The new check
+fired for real:
+
+```
+ERROR: only 3.43 GB of committable memory free; BGE-M3 needs about 4.0 GB.
+       Re-run with --no-gates to generate without the relevance and duplication gates.
+CLI exit code: 1
+```
+
+The check deliberately reads AFTER the cross-encoder load. Measured: checking
+first would have PASSED at 4.73 GB free and then hard-killed the process, because
+the cross-encoder takes ~1.3 GB. Moving it earlier trades a 40-second wait for an
+uncatchable crash.
+
+### The mutation that was NOT CAUGHT
+
+`from_cache` added across passes instead of held — 4/5 on the first run. The cause
+was a flaw in my own design rather than a missing test: `generate_exam` stamps
+`from_cache` AFTER merging, so `_merge_gate_reports` could not be reached
+end-to-end at all. Either it stops carrying the key and silently drops it, or it
+is asserted directly. Tested directly; 5/5.
+
+### Integrity
+
+Sandboxed `DATA_DIR`/`OUTPUT_DIR` with a loud assertion refusing to start if either
+resolves inside the repo. Afterwards all five irreplaceable artifacts match the
+evaluator's recorded hashes byte for byte:
+
+```
+data/course_map.json       490165  91e0677cf78e6add
+output/paper.json           36611  7b82d8152a94de57
+output/exam.pdf             20210  dfb955a8528d9cd1
+output/answer_key.pdf       19995  00da0b96f867a9fa
+output/run_manifest.json     2837  567551f82286b080
+```
+
+Cost: **1 call, 944 tokens.**
+
+```
+$ python -m pytest -q
+650 passed, 9 skipped        (was 623 / 9)
+```
+
+### Still open from the evaluation
+
+Twelve findings. F14 (the out-of-corpus chat path answers paediatric antibiotic
+dosing from general knowledge — routing is correct, the absence of a domain
+boundary on the fallback is the question) is the one worth deciding on next,
+because it is a product decision rather than a defect.
