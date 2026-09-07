@@ -52,10 +52,16 @@ single-worker and only one copy at a time.
 ```bash
 cd backend
 pip install -e ".[dev]"
-cp .env.example .env          # add GEMINI_API_KEY
+cp .env.example .env          # then add your GEMINI_API_KEY to it
 
-python -m coursegen.generate --ingest "data/My Course"     # ~10 min, once
-uvicorn coursegen.app.main:app --workers 1                 # single worker only
+# Ingest your own material once — replace the path with your folder of
+# .pdf / .pptx / .docx. Skip this if data/course_map.json already exists.
+python -m coursegen.generate --ingest "data/Your Course Folder"
+
+# `python -m uvicorn`, not bare `uvicorn`: pip installs console scripts to a
+# per-user Scripts directory that is often not on PATH, and the bare form then
+# fails with "not recognized". The module form always resolves.
+python -m uvicorn coursegen.app.main:app --workers 1        # single worker only
 ```
 
 **Frontend** — in a second terminal:
