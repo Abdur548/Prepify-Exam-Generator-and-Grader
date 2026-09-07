@@ -24,7 +24,7 @@ import pytest
 
 from coursegen import config
 from coursegen.contracts.course_map import CourseMapNode, NodeFlags
-from coursegen.contracts.item import GeneratedItem, ItemSpec, MCQOption, SourceRef
+from coursegen.contracts.item import ItemSpec
 
 
 def _import_generate():

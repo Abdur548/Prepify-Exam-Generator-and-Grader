@@ -34,6 +34,13 @@ def _run_dry_run() -> None:
     print(f"Endpoint : {config.GEMINI_BASE_URL}")
     print(f"Call cap : {config.PER_EXAM_CALL_CAP} per exam")
     print(f"Token cap: {config.PER_EXAM_TOKEN_CAP} per exam")
+    # The day cap is enforced from a ledger on disk, so the number that matters is
+    # what is left today, not the ceiling. A dry run reaches no provider and does
+    # not spend it.
+    from coursegen.llm.client import DailyCallLedger
+
+    used = DailyCallLedger(config.call_ledger_path()).calls_today()
+    print(f"Day cap  : {used}/{config.PER_DAY_CALL_CAP} used today (this app's own count)")
     print()
 
     client = LLMClient(dry_run=True)

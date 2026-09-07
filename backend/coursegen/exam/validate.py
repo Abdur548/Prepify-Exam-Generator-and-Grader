@@ -5,7 +5,7 @@ import math
 import random
 import re
 from dataclasses import dataclass
-from typing import Callable, Iterable, Any
+from typing import Callable, Any
 
 from pydantic import ValidationError
 

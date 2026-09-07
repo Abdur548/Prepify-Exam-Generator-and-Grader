@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # The duplication gate needs an embedder, and this front end never passed
         # one — so every CLI run reported `duplication.skipped: true`, including
-        # the paper STATE.md cites as the system's one real end-to-end result. The
+        # the project's one real end-to-end paper. The
         # module docstring above has claimed this was fixed since the pipeline
         # extraction; it was not, until 2026-09-06 (F12).
         from coursegen.app.preflight import _check_memory_headroom

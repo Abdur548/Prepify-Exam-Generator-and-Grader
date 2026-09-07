@@ -20,9 +20,9 @@ import yake  # type: ignore[import]
 from coursegen import config
 from coursegen.contracts.course_map import CourseMapNode, NodeFlags
 from coursegen.ingest.chunk import Chunk, chunk_section
-from coursegen.ingest.embed import EmbedResult, embed_chunks, load_model
+from coursegen.ingest.embed import embed_chunks, load_model
 from coursegen.ingest.index import get_client, get_or_create_collection, upsert_chunks
-from coursegen.ingest.parse import ParsedDocument, parse_directory
+from coursegen.ingest.parse import parse_directory
 from coursegen.ingest.structure import LeafSection, extract_sections
 
 logger = logging.getLogger(__name__)
@@ -269,7 +269,7 @@ def _compute_instructional_mass(nodes: list["_RawNode"]) -> list[float]:
     has always done. It is arguably the better measure — a term that is prominent
     enough elsewhere to be extracted is stronger evidence of cross-document
     importance than a term that merely occurs — but it IS a narrowing, and it is
-    flagged in todo.md for the human to confirm. Broadening it to raw text presence
+    flagged for the human to confirm. Broadening it to raw text presence
     would change every node's weight and therefore every exam allocation, so the
     change is not made unilaterally.
 
@@ -302,7 +302,7 @@ def _compute_instructional_mass(nodes: list["_RawNode"]) -> list[float]:
     masses = [r / total for r in raw]
 
     # Round and apply a largest-remainder correction to the node with the
-    # highest mass so the sum stays within float tolerance (see todo.md).
+    # highest mass so the sum stays within float tolerance.
     prec = config.COURSE_MAP_FLOAT_PRECISION
     rounded = [round(m, prec) for m in masses]
     diff = round(1.0 - sum(rounded), prec + 2)

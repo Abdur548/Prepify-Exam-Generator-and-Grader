@@ -3,7 +3,7 @@
 There were no tests over `coursegen/generate.py` at all, which is why F12 survived
 five days after the docstring said it was fixed: the CLI passed no `embedding_fn`,
 so every CLI run reported `duplication.skipped: true` — including the 20-item paper
-`STATE.md` cites as the system's one real end-to-end result.
+that is the project's one real end-to-end result.
 
 These tests are about WIRING, not about the gates themselves. The gates have their
 own tests; what was missing is anything asserting the front end actually reaches

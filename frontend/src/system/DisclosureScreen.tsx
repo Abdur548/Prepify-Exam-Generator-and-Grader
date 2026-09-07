@@ -8,7 +8,7 @@ import "./system.css";
  *
  * The original banner reads *"must be reviewed by a qualified educator before use
  * in any graded assessment… does not replace instructor judgment"*. That is
- * written for a teacher setting work, and `UI-DESIGN.md` §8 decided the primary
+ * written for a teacher setting work, and the UI spec decided the primary
  * user is **the student revising their own notes**. Told they need an educator to
  * review their own revision quiz, a student learns nothing and skips the banner.
  *

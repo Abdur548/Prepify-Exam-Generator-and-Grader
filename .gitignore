@@ -39,7 +39,3 @@ output/
 # If the §14.6 pre-baked demo collection is ever committed, do it deliberately with
 # `git add -f` after the S9 secret scan — never by relaxing this rule.
 data/
-
-# Local agent settings: machine-specific paths and permission grants. Was covered
-# only by the user's global core.excludesFile, which no clone inherits.
-.agent/settings.local.json

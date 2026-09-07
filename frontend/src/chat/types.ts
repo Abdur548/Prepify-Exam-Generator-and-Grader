@@ -19,7 +19,7 @@ export interface ChatAnswer {
    * `false` means the answer was NOT drawn from the student's uploads. It is not
    * an error and not a lower-quality answer — it is a different *kind* of answer,
    * and the only one they cannot check against a page of their own notes. Shown
-   * without trace colour and labelled, per `UI-DESIGN.md` §5.6.
+   * without trace colour and labelled, per the UI spec.
    */
   from_material: boolean;
   /** Present only when a known limit was hit — quota, or the model unreachable. */

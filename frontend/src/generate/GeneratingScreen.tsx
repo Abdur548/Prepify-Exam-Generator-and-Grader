@@ -44,7 +44,7 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "reading", label: "Reading your material" },
   { id: "choosing", label: "Choosing what to ask" },
   { id: "writing", label: "Writing questions" },
-  // NOT "Checking sources", which UI-DESIGN.md originally specified. Nothing in
+  // NOT "Checking sources", which the UI spec originally called for. Nothing in
   // this stage establishes that a question is true, and that label would tell a
   // student it did. The gates that do run check relevance and duplication, and
   // they run inside "Writing questions".

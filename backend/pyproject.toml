@@ -37,6 +37,11 @@ dev = [
     "pytest",
     "pytest-mock",
     "pytest-playwright",
+    # Used by tests/test_p5_browser_e2e.py to poll the live server's health
+    # endpoint. Declared rather than relied on transitively, for the same reason
+    # numpy and huggingface-hub are above: it arrives via other packages today,
+    # and a direct import should not depend on that continuing.
+    "requests",
 ]
 
 [project.scripts]

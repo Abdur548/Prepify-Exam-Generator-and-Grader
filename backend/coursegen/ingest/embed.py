@@ -9,7 +9,7 @@ Device selection honours C6: detect CUDA/MPS and use it; never require it.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
@@ -45,8 +45,8 @@ def dense_embedding_fn(model: "BGEM3FlagModel") -> Callable[[list[str]], list[li
     Lives here, beside the model, because it existed only as a closure inside
     `app/main.py` and so only the HTTP route had one. The CLI passed no
     `embedding_fn` at all and therefore reported `duplication.skipped: true` on
-    every run — including the 20-item paper `STATE.md` cites as the system's one
-    real end-to-end result, which shipped with two of four gates never run (F12).
+    every run — including the project's one real end-to-end paper, which shipped
+    with two of four gates never run.
 
     `pipeline.py` was extracted to stop exactly this: two callers sequencing the
     same stages and drifting. That fixed the sequence and left the collaborators

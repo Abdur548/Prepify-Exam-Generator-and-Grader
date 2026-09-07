@@ -202,7 +202,7 @@ BATCH_SIZE: int = 6                  # item specs per LLM call
 # one. Be honest about how thin that is: the nearest correct sample sits 0.94
 # above it and the nearest incorrect one 0.58 below — ONE sample per category,
 # not a calibration. It needs a labelled set of grounded and hallucinated answers
-# over this corpus before it can be trusted; see todo.md.
+# over this corpus before it can be trusted. Still uncalibrated.
 #
 # DO NOT COPY RERANKER_THRESHOLD (-2.0) HERE. Same model, different task, different
 # distribution: that one scores a QUESTION against a candidate chunk, this scores a
@@ -351,7 +351,7 @@ TOPIC_STOPWORDS: frozenset[str] = frozenset({
 # UNCALIBRATED. 0.5 says "admit nodes within half the best node's evidence"; it was
 # reasoned, not measured. Do NOT tune it against the synthetic test fixtures: they
 # are a generic CS syllabus, not the real AI deck, and a number fitted to them
-# would look measured while meaning nothing (todo.md).
+# would look measured while meaning nothing. Still uncalibrated.
 TOPIC_MATCH_RELATIVE_FLOOR: float = 0.5
 # UNIT: absolute matched IDF mass, in nats — the same units as one idf(t) term,
 # so it is read as "how distinctive must the best match's evidence be".
@@ -364,7 +364,7 @@ TOPIC_MATCH_RELATIVE_FLOOR: float = 0.5
 # UNCALIBRATED. 1.5 is roughly the idf of a term appearing in half the corpus
 # (N=20, df=10 → 1.647), i.e. "require at least one matched term more distinctive
 # than 'half the course mentions it'". Reasoned, not measured, and NOT fitted to
-# the fixtures — same warning as above (todo.md).
+# the fixtures — same warning as above. Still uncalibrated.
 TOPIC_MATCH_MIN_EVIDENCE: float = 1.5
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -280,7 +279,7 @@ class TestDegradedMode:
 
     def test_network_error_during_generation_returns_degraded_not_500(self, client, monkeypatch) -> None:
         import httpx
-        from coursegen.contracts.item import GeneratedItem, SourceRef, ItemSpec
+        from coursegen.contracts.item import ItemSpec
         
         # We want to patch the actual LLMClient so generation starts and then dies.
         # But we must also stub the models and Qdrant so it doesn't do real I/O.
@@ -403,7 +402,6 @@ class TestExamPipelineWiring:
         """
         monkeypatch.setenv("GEMINI_API_KEY", _TEST_API_KEY)
         from coursegen.app.main import _run_exam_pipeline
-        from coursegen.contracts.coverage import CoverageReport
         from coursegen.exam.render import RenderArtifacts
         from coursegen.exam.generate import GenerationResult
 

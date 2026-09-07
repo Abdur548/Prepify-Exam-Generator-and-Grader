@@ -3,7 +3,7 @@
 The screen this feeds exists because a first generation costs about fifty
 seconds and a bare spinner over that reads as a hang. That only holds if the
 stages are *real*: the moment the frontend can fake them from a timer, the
-honest-progress claim in `docs/UI-DESIGN.md` becomes false. So what these tests
+honest-progress claim the UI makes becomes false. So what these tests
 actually protect is that the events come from the pipeline and that the streamed
 outcome cannot drift from the JSON one.
 

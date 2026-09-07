@@ -204,8 +204,8 @@ def generate_paper(
 
     # ---- assembling --------------------------------------------------------
     # Named for what happens: the factuality gate (when it is on), then rendering
-    # the documents. UI-DESIGN.md called this stage "Checking sources", which R6
-    # forbids — it would tell a student their questions had been checked against
+    # the documents. The UI spec originally called this stage "Checking sources",
+    # which the project's honesty rule forbids — it would tell a student their questions had been checked against
     # the material, and nothing here establishes that a question is TRUE. The
     # gates that do run (schema, relevance, duplication, MCQ hygiene) run inside
     # `writing`, and they check relevance, not correctness.

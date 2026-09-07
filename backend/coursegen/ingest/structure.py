@@ -16,7 +16,7 @@ threshold near 14 pt would classify every block in such a document as a heading.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from coursegen import config
@@ -207,7 +207,7 @@ def _extract_docx_sections(doc: ParsedDocument) -> list[LeafSection]:
     Heading paths are FLAT (one entry, the current heading), exactly as the PPTX path
     produces flat slide-title paths. DOCX style names do carry a level ("Heading 1"
     vs "Heading 2") and could nest, but TextBlock carries no level and nothing in
-    this change asks for nesting — recorded in todo.md rather than invented here.
+    this change asks for nesting, so it is left flat rather than invented here.
     """
     sections: list[LeafSection] = []
     heading: Optional[str] = None

@@ -43,7 +43,7 @@ class TopicCoverage(BaseModel):
     # Highest matched IDF mass among the ADMITTED nodes; 0.0 if none were admitted.
     # A topic rejected by TOPIC_MATCH_MIN_EVIDENCE therefore still reports 0.0 even
     # though its best candidate scored above zero — that near-miss lives only in
-    # the warning text (recorded in todo.md).
+    # the warning text, and is not reported as a number anywhere.
     best_score: float
     slots_requested: int
     slots_filled: int

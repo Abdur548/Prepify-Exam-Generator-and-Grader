@@ -10,7 +10,6 @@ one sends a student looking for a problem that is not there.
 """
 from __future__ import annotations
 
-import threading
 import time
 from typing import Any
 from unittest.mock import patch

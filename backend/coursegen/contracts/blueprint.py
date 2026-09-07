@@ -84,7 +84,7 @@ class SectionSpec(BaseModel):
     # are authored by the project. The moment users can supply their own
     # blueprints this becomes a live prompt-injection surface and the text needs
     # the same delimiting-and-distrusting treatment source spans already get.
-    # See todo.md.
+    # Open, and deliberately so while blueprints ship with the project.
     generation_instructions: Optional[str] = None
 
     @model_validator(mode="after")

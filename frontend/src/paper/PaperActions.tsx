@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
  * equivalent; linking the page that prints it would be doing exactly that at one
  * remove, and a student who opened it would conclude their paper was worthless.
  *
- * **There is no Word export.** `UI-DESIGN.md` §5.4 asks for "Download Word", and
+ * **There is no Word export.** The UI spec asks for "Download Word", and
  * `/api/files/exam.docx` returns 404 because nothing renders one. A button for it
  * would be a button that fails, so the gap is left visible rather than papered
  * over.

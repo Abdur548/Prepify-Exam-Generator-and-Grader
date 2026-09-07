@@ -13,8 +13,8 @@ individually, and that labelling is what to trust; this header only says which m
 
 Every dimension below is either **MEASURED** (a real number, taken on the date shown, with
 the command that produced it) or **SPECIFIED** (defined, with a gate and a falsification
-condition, not yet run). The two are never mixed. §2.4 applies to this document as it applies
-to `progress.md`: no status reads PASS without the command output pasted beneath it.
+condition, not yet run). The two are never mixed. One rule governs this document: no status
+reads PASS without the command output pasted beneath it.
 
 A note on what this document is for. An evaluation that only reports the numbers that
 flatter the system is marketing. Each section below therefore names its **falsification
@@ -307,27 +307,21 @@ Longest functions — the maintainability hotspots:
 
 ### As a handoff system — assessed, not measured
 
-What works: the three living documents (`pipeline.md` / `progress.md` / `todo.md`) with an
-explicit precedence order; rationale recorded *in the code* at the decision site rather than
-in a wiki that drifts; `STATE.md` as a cold-start brief and the working rules as the rules.
+What works: rationale recorded *in the code* at the decision site rather than in a wiki that
+drifts. Every non-obvious constant, threshold and guard carries the measurement that set it
+and the failure that motivated it, next to the line it governs.
 
 What does not, and should be in the report honestly:
 
 - **`_solve_section` at 256 lines** is the single hardest thing in the codebase to hand over.
   It carries most-constrained-first ordering, largest-remainder apportionment, span
   uniqueness, and exhaustion fallback in one function.
-- **`progress.md` is 2,392 lines and grows monotonically.** It is a superb audit trail and a
-  poor onboarding document. Needs a stable summary at the head, or splitting.
 - **Requirements live outside the repo.** `PRD-qoder-spec.md` and `implementation-plan.md` are
   not tracked here. P6 itself had no written spec until this file. A handoff system whose
   requirements are external is one lost file away from unmaintainable.
-- **Tests mock the expensive paths**, which is correct for speed and has twice hidden real
-  breakage (`show_progress_bar`; the static-UI `SyntaxError`). Opt-in `--live` tests are
-  queued and still not written.
-
-*Falsification for the handoff claim:* hand `STATE.md` + the working rules to a fresh agent, ask
-for one scoped change, and count the questions it must ask before it can act. That number is
-the real maintainability metric, and it can be run this week.
+- **Tests mock the expensive paths**, which is correct for speed and has repeatedly hidden
+  real breakage (`show_progress_bar`; the static-UI `SyntaxError`; a duplication gate the CLI
+  never wired). Opt-in `--live` tests exist but are thin.
 
 ---
 

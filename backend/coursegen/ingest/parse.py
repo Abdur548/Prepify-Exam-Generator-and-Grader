@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
@@ -488,8 +488,8 @@ def _parse_docx(path: Path) -> ParsedDocument:
     disclosed limitation, not an approximation waiting to be improved: counting
     explicit page breaks would report "page 1" for the great majority of real
     documents, which contain none, and a plausible-looking wrong page number in a
-    citation is worse than an honest ordinal. pipeline.md states the consequence for
-    citations; todo.md carries the renderer-side fix (label a DOCX locator "¶12",
+    citation is worse than an honest ordinal. The renderer-side fix is still open
+    (label a DOCX locator "¶12",
     not "p.12"), which needs the source type available at citation time.
 
     MAX_PAGES is deliberately NOT applied: there are no pages to count, and applying

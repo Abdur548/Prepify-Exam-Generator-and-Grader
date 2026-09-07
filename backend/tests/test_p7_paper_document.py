@@ -6,7 +6,6 @@ and a factuality gate that did not run versus one that returned nothing good.
 """
 from __future__ import annotations
 
-import pytest
 
 from coursegen.contracts.blueprint import Blueprint, SectionSpec
 from coursegen.contracts.coverage import CoverageReport

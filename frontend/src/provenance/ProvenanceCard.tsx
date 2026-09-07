@@ -4,7 +4,7 @@ import "./provenance.css";
 /**
  * Drag a question aside to see the page it was written from.
  *
- * The signature gesture (`UI-DESIGN.md` §4). Papersetter's split answers *"how
+ * The signature gesture. Papersetter's split answers *"how
  * will this be delivered?"*; this one answers *"why should I believe this
  * question?"* — the only thing a student actually wants to know about a paper an
  * AI wrote. Dragging right dissolves the question into its source; releasing

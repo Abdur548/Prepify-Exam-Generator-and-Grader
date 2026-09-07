@@ -36,14 +36,13 @@ import pytest
 from coursegen import config
 from coursegen.contracts.blueprint import Blueprint
 from coursegen.exam.allocate import solve
-from coursegen.ingest.chunk import Chunk, _chunk_id, chunk_section
+from coursegen.ingest.chunk import _chunk_id, chunk_section
 from coursegen.ingest.coursemap import (
     _compute_node_id,
     _compute_instructional_mass,
     _derive_flags,
     ingest,
     load_course_map,
-    save_course_map,
     _RawNode,
 )
 from coursegen.ingest.index import get_client
@@ -316,7 +315,7 @@ class TestParseDOCX:
         """
         A .docx has NO pages — pagination does not exist until Word renders the
         document. `page` is therefore the 1-based ordinal of the block within the
-        document: a disclosed limitation recorded in pipeline.md, not a page estimate.
+        document: a disclosed limitation, not a page estimate.
         No page-counting heuristic is applied, deliberately.
         """
         doc = parse_file(structured_docx)

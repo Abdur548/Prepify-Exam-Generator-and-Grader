@@ -44,7 +44,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from coursegen import config
 from coursegen.contracts.blueprint import Blueprint
 from coursegen.contracts.course_map import CourseMapNode
 from coursegen.exam.allocate import solve

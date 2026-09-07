@@ -81,7 +81,7 @@ def _load_shipped(name: str) -> Blueprint:
 # n02 sits 0.077 under it. Semantically that is the right call — "1.2 Data Types"
 # is not a data structure — but the margin is thin enough that this test is
 # pinning a near-tie, and it is here as a fact about the fixture rather than as
-# evidence the floor is well placed. Both constants are UNCALIBRATED (todo.md).
+# evidence the floor is well placed. Both constants are UNCALIBRATED.
 TOPIC_DATA_STRUCTURES = "Data Structures"
 DATA_STRUCTURES_BEST_MASS = 4.3514
 DATA_STRUCTURES_MATCHES = ["n04", "n05", "n06", "n07", "n08"]
@@ -101,7 +101,7 @@ DATA_STRUCTURES_AND_FIGURE = ["n04", "n05", "n06", "n07", "n08"]
 # "1.3 Variables and Scope"), and because both are RARE they are weighted UP —
 # 3.351 each, comfortably past TOPIC_MATCH_MIN_EVIDENCE = 1.5. It would now match
 # two nodes on two coincidental words. That is a real property of the new rule,
-# not a fixture accident, and it is recorded in todo.md.
+# not a fixture accident.
 TOPIC_ABSENT = "Post-Quantum Cryptography from Lattice Assumptions"
 
 

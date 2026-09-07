@@ -15,7 +15,7 @@
  *
  * ## Nothing is discarded
  *
- * the working rules §1D: never delete a warning for being noisy. These are not deleted —
+ * Never delete a warning for being noisy. These are not deleted —
  * they are still in the API response, the coverage report and the run manifest,
  * and the panel keeps every original behind a disclosure. What changes is which
  * of them leads.
