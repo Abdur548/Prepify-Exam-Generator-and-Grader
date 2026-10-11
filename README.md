@@ -38,8 +38,9 @@ prepify/
 │       ├── provenance/     source reveal for an individual question
 │       └── chat/           chat over the same corpus
 └── docs/
-    ├── API-CONTRACT.md     the frozen HTTP surface the frontend depends on
-    └── P6-EVALUATION.md    measured results, with falsification conditions
+    ├── API-CONTRACT.md                 the frozen HTTP surface the frontend depends on
+    ├── P6-EVALUATION.md                measured results, with falsification conditions
+    └── Prepify-Jury-Presentation.pptx  the jury presentation, with speaker notes
 ```
 
 ## Running it
