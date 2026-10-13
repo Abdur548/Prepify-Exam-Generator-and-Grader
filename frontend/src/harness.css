@@ -33,3 +33,9 @@
   margin: var(--s-2) 0 0; padding-left: 1.1em;
   font-size: var(--t-xs); color: var(--graphite); line-height: 1.6;
 }
+
+/* The way into practice, above the paper it offers. */
+.takebar { display: flex; align-items: center; gap: var(--s-4); flex-wrap: wrap;
+  max-width: var(--paper-width); margin: 0 auto var(--s-4); font-family: var(--face-tool); }
+.takebar__hint { font-size: var(--t-sm); color: var(--graphite); }
+.takebar--off { font-size: var(--t-sm); color: var(--graphite); }

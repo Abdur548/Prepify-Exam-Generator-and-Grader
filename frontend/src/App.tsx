@@ -5,6 +5,11 @@ import { ChatScreen } from "./chat/ChatScreen";
 import { DisclosureScreen } from "./system/DisclosureScreen";
 import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
+import { AnswerSheet } from "./practice/AnswerSheet";
+import { Results } from "./practice/Results";
+import { contestMark, getAttempt, submitAttempt } from "./practice/api";
+import { clearDraft } from "./practice/drafts";
+import type { AttemptResult, SheetDoc } from "./practice/types";
 import type { Plan } from "./plan/types";
 import type { RunOutcome } from "./generate/types";
 import type { Paper as PaperDoc } from "./paper/types";
@@ -15,7 +20,15 @@ import "./harness.css";
  * Dev harness. Five screens: upload, the blueprint (with its free dry run), the
  * wait, the paper, and ask. All run against the real API rather than fixtures.
  */
-type Screen = "upload" | "blueprint" | "disclosure" | "generating" | "paper" | "chat";
+type Screen =
+  | "upload"
+  | "blueprint"
+  | "disclosure"
+  | "generating"
+  | "paper"
+  | "chat"
+  | "answer"
+  | "results";
 
 // The gate lives in the server's process memory and resets on restart, so this is
 // a hint about what the server probably thinks — never the authority. A stale
@@ -28,6 +41,11 @@ export default function App() {
   const [paper, setPaper] = useState<PaperDoc | null>(null);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
   const [fromMaterialOnly, setFromMaterialOnly] = useState(false);
+  // Practice: the sheet being answered, and the marks that came back.
+  const [sheet, setSheet] = useState<SheetDoc | null>(null);
+  const [attempt, setAttempt] = useState<AttemptResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [accepted, setAccepted] = useState(() => {
     try {
       return sessionStorage.getItem(ACCEPTED_KEY) === "yes";
@@ -62,6 +80,44 @@ export default function App() {
     setOutcome(result);
     setScreen("paper");
   }, []);
+
+  const takeSheet = useCallback((doc: SheetDoc) => {
+    setSheet(doc);
+    setSubmitError("");
+    setScreen("answer");
+  }, []);
+
+  const submit = useCallback(
+    async (responses: Record<string, string>) => {
+      if (!sheet?.sheet_id) return;
+      setSubmitting(true);
+      setSubmitError("");
+      try {
+        const result = await submitAttempt(sheet.sheet_id, responses);
+        // Only once the server has them: a failed submit keeps the draft.
+        clearDraft(sheet.sheet_id);
+        setAttempt(result);
+        setScreen("results");
+      } catch (e) {
+        setSubmitError(e instanceof Error ? e.message : "Your answers were not sent.");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [sheet],
+  );
+
+  // Re-read the whole attempt after a contest rather than patching one item: the
+  // totals depend on every mark, and recomputing them here would be a second
+  // copy of the server's rule that could drift from it.
+  const contest = useCallback(
+    async (slotId: string, marks: number) => {
+      if (!attempt) return;
+      await contestMark(attempt.attempt_id, slotId, marks);
+      setAttempt(await getAttempt(attempt.attempt_id));
+    },
+    [attempt],
+  );
 
   // Leaving mid-run is safe — the pipeline finishes regardless — but coming back
   // and pressing Generate again is not: the second run blocks on the process lock
@@ -172,12 +228,60 @@ export default function App() {
           (paper ? (
             <div className="harness__main">
               {outcome && <RunNotice outcome={outcome} />}
+              <TakeBar paper={paper} onTake={() => takeSheet(paper)} />
               <Paper paper={paper} fromMaterialOnly={fromMaterialOnly} />
             </div>
           ) : (
             <p style={{ padding: 32 }}>No paper generated yet.</p>
           ))}
+
+        {screen === "answer" && sheet && (
+          <div className="harness__main">
+            <AnswerSheet
+              sheet={sheet}
+              submitting={submitting}
+              error={submitError}
+              onSubmit={submit}
+            />
+          </div>
+        )}
+
+        {screen === "results" && attempt && (
+          <div className="harness__main">
+            <Results
+              result={attempt}
+              onContest={contest}
+              onDone={() => setScreen("paper")}
+            />
+          </div>
+        )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * The way into practice. A paper whose archive failed is still readable but has
+ * nothing to answer against, so it says so instead of offering a button that
+ * would only ever fail.
+ */
+function TakeBar({ paper, onTake }: { paper: PaperDoc; onTake(): void }) {
+  if (!paper.sheet_id) {
+    return (
+      <p className="takebar takebar--off" role="status">
+        This paper can't be taken — it was not saved for answering. Generate it
+        again to take it.
+      </p>
+    );
+  }
+  return (
+    <div className="takebar">
+      <button type="button" className="sheet__submit" onClick={onTake}>
+        Take this paper
+      </button>
+      <span className="takebar__hint">
+        Answer it here and get marks, with the page to revise for each question.
+      </span>
     </div>
   );
 }

@@ -1,0 +1,241 @@
+/* Practice: answering a sheet, and the marks that come back.
+ *
+ * Built on the paper's own classes (.paper, .section, .item, .item__marks) so a
+ * sheet being answered reads as the paper it is. Colour follows tokens.css:
+ * --trace only for "this came from your material" (the revise chip and its
+ * passage), --warn for status (a mark worth a second opinion), never the reverse.
+ */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- answering ---------- */
+
+.sheet__lead {
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+  max-width: 60ch;
+}
+
+.sheet__tag {
+  display: inline-block;
+  margin: 0 0 var(--s-2);
+  padding: 2px var(--s-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.sheet__choices {
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: var(--s-2);
+}
+
+.sheet__choice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-size: var(--t-md);
+  cursor: pointer;
+}
+
+.sheet__choice input {
+  accent-color: var(--slate);
+  transform: translateY(1px);
+}
+
+.sheet__written {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  font-family: var(--face-paper);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.sheet__written:focus,
+.results__contest input:focus {
+  outline: 2px solid var(--slate);
+  outline-offset: 1px;
+}
+
+.sheet__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-top: var(--s-6);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-family: var(--face-tool);
+}
+
+.sheet__count {
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.sheet__submit {
+  padding: var(--s-2) var(--s-5);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--slate);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sheet__submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sheet__error,
+.results__error {
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--stop);
+}
+
+/* ---------- results ---------- */
+
+.results__total {
+  margin: var(--s-2) 0 0;
+  font-family: var(--face-evidence);
+  font-size: var(--t-xl);
+  color: var(--ink);
+}
+
+.results__sub {
+  margin: var(--s-1) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-sm);
+  color: var(--graphite);
+}
+
+.results__item {
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+}
+
+.results__label {
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--graphite);
+}
+
+.results__answer {
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-md);
+  white-space: pre-wrap;
+}
+
+.results__source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 0;
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.results__badge {
+  padding: 1px var(--s-2);
+  border-radius: 999px;
+  background: var(--warn-wash);
+  color: var(--warn);
+  font-weight: 500;
+}
+
+.results__reason {
+  margin: var(--s-1) 0 0;
+  font-size: var(--t-sm);
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.results__revise {
+  margin-top: var(--s-3);
+  display: grid;
+  gap: var(--s-2);
+}
+
+/* Provenance, so --trace: the page in the student's own material. */
+.results__chip {
+  justify-self: start;
+  padding: 3px var(--s-3);
+  border: 1px solid var(--trace);
+  border-radius: 999px;
+  background: var(--trace-wash);
+  color: var(--trace-deep);
+  font-family: var(--face-evidence);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.results__item .cite--none {
+  margin-top: var(--s-3);
+}
+
+.results__contest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  font-family: var(--face-tool);
+  font-size: var(--t-xs);
+  color: var(--graphite);
+}
+
+.results__contest input {
+  width: 4.5em;
+  padding: 2px var(--s-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-family: var(--face-evidence);
+}
+
+.results__contest .reveal {
+  margin-left: 0;
+}
+
+.results__mark {
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .sheet__foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
