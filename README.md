@@ -88,17 +88,42 @@ Generation loads a cross-encoder and BGE-M3 for the relevance and duplication ga
 (~4 GB of committable memory). It checks for that headroom first and tells you to use
 `--no-gates` rather than dying mid-run.
 
+## Practice: taking a paper (MVP 2)
+
+Every generated paper can be taken in the browser. **Take this paper** turns it into an
+answer sheet; submitting marks it and shows, for every question, the mark, the answer key or
+model answer, and the page of your own material to revise.
+
+- **Multiple-choice and true/false** are marked against the stored key — no model.
+- **Written answers** are marked by the model against the model answer and the source
+  passage, one call per six answers. Each mark carries a one-line reason and a confidence;
+  low-confidence marks say *check with your teacher*. **Any mark can be contested**, and the
+  mark you give is the one that counts.
+- **Progress** shows mastery per lecture beside how much of the lecture has been tested.
+- **Review** brings back what you missed: the same question first (options reordered), then
+  — once you have passed it — a new question on the same passage. Re-tests return at your
+  next review, then 2, 4 and 8 attempts later.
+- **Next paper, built on my answers** keeps the material you got wrong, swaps out what you
+  have mastered for material you have not been tested on, and asks questions you have
+  already seen in new words.
+
+History lives in `backend/output/prepify.db` (SQLite, gitignored). Mastery and re-tests are
+derived from it every time, never stored, so contesting a mark re-derives everything after
+it. Design: `docs/MVP2-GRADER-DESIGN.md`.
+
 ## Testing
 
 ```bash
-cd backend  && python -m pytest        # 650 tests, no network
-cd frontend && npm test               # 18 tests
+cd backend  && python -m pytest        # 913 tests, no network
+cd frontend && npm test               # 71 tests
 cd frontend && npm run build          # typecheck + production build
 ```
 
 ```bash
 cd backend && python -m pytest --live -m live   # real models + real API calls
 cd backend && python -m coursegen.eval          # allocation evaluation, no LLM calls
+cd backend && python -m coursegen.eval adapt    # E9: what the adaptive next paper does, no LLM calls
+cd backend && python -m coursegen.eval marking  # E10: marking agreement — needs hand marks, spends quota
 ```
 
 ## What it does not do
@@ -119,3 +144,18 @@ inside a correctly quoted block is a separate, unsolved problem.
 
 **The daily call cap counts this application's own calls**, on the local calendar
 day. It is not the provider's quota and does not know about calls made elsewhere.
+
+**A model's mark on a written answer is a judgement, not a verdict.** Its confidence is
+the model's own report, not a calibrated probability, and its agreement with a teacher's
+marks has not been measured yet: `python -m coursegen.eval marking` needs the team's own
+hand marks in `backend/coursegen/eval/marking_set.csv` first (`docs/P6-EVALUATION.md`, E10).
+Until then every model mark should be read as a suggestion — which is why every one can be
+contested.
+
+**The next paper does not drill weak topics harder.** Measured on the real course map
+(E9): it keeps weak material in and trades mastered material for untested material, 12 of
+12 cases — but a passage carries at most one question per paper, so it cannot ask about a
+weak passage more than once. Drilling is the review set's job.
+
+**Re-tests are spaced in attempts, not days.** Five attempts in one evening space them
+minutes apart.

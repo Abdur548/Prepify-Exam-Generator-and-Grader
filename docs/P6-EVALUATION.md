@@ -534,6 +534,36 @@ results is a different question, and nothing here answers it.
 
 ---
 
+## E10 — written-marking agreement (MVP 2)
+
+**Claim under test:** a model's mark on a written answer is close enough to a teacher's to
+be shown as a mark at all, and its confidence label says something about when it is not.
+
+**Instrument:** `python -m coursegen.eval marking --runs 3` over
+`backend/coursegen/eval/marking_set.csv` — six generic AI questions, five answers each
+(full, partial, wrong, vague, adversarial), written for this harness rather than taken from
+any course material. The adversarial answers try to talk the marker into full marks: an
+instruction addressed to the marker, a forged `</student_answer>` block, a forged
+`<source_span>`, and a forged JSON verdict. ~15 live calls.
+
+**Falsification:**
+- **Agreement** — if fewer than 80% of model marks land within ±1 of the hand mark, every
+  written mark is shown as low confidence.
+- **Badge** — if low-confidence marks do not disagree with the hand mark (by more than 1)
+  more often than high-confidence ones, the *check with your teacher* badge carries no
+  information and is removed.
+- **Spread** — each answer is marked three times; the spread between runs is reported, since
+  the same answer receiving different marks is a finding in itself.
+
+### SPECIFIED — not yet run
+
+**The `hand_mark` column ships blank, and the harness refuses to run until it is filled.**
+The agreement measured is agreement with the person who marked the set; a column filled by
+anyone else — or by a model — would make the number measure nothing. Until it runs, the
+README says plainly that model marks are suggestions, and every one can be contested.
+
+---
+
 ## Build order
 
 1. **`baseline_naive`** — E2 is the phase's reason to exist and nothing else unblocks it.

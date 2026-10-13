@@ -6,6 +6,7 @@
 
     python -m coursegen.eval reliability --runs 10   # E8, SPENDS LIVE QUOTA
     python -m coursegen.eval adapt                   # E9 adaptive next paper, free
+    python -m coursegen.eval marking --runs 3        # E10 marking agreement, SPENDS QUOTA
 
 The allocation evaluation is free and deterministic. The reliability harness makes
 real API calls — roughly `runs x calls_per_paper` of them — so it takes an explicit
@@ -116,6 +117,29 @@ def _run_adapt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_marking(args: argparse.Namespace) -> int:
+    from coursegen.eval.marking import aggregate, format_report as fmt, load_set, run_live
+
+    try:
+        rows = load_set(Path(args.set))
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    batches = -(-len(rows) // config.GRADE_BATCH_SIZE)
+    print(f"E10 marking agreement: {len(rows)} answers x {args.runs} runs")
+    print(f"  estimated ~{batches * args.runs} live API calls before retries "
+          f"(PER_DAY_CALL_CAP={config.PER_DAY_CALL_CAP})\n")
+    result = aggregate(rows, run_live(rows, args.runs))
+    report = fmt(result, runs=args.runs)
+    print(report)
+    args.output.mkdir(parents=True, exist_ok=True)
+    (args.output / "e10_marking.txt").write_text(report + "\n", encoding="utf-8")
+    (args.output / "e10_marking.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"\nWrote {args.output / 'e10_marking.txt'}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -139,7 +163,15 @@ def main() -> int:
     ad.add_argument("--course-map", default=str(config.COURSE_MAP_PATH))
     ad.add_argument("--output", type=Path, default=config.OUTPUT_DIR)
 
+    mk = sub.add_parser("marking", help="E10 written-marking agreement (SPENDS QUOTA)")
+    mk.add_argument("--set", default=str(Path(__file__).resolve().parent / "marking_set.csv"),
+                    help="CSV of answers with the team's hand marks")
+    mk.add_argument("--runs", type=int, default=3)
+    mk.add_argument("--output", type=Path, default=config.OUTPUT_DIR)
+
     args = ap.parse_args()
+    if args.command == "marking":
+        return _run_marking(args)
     if args.command == "reliability":
         return _run_reliability(args)
     if args.command == "adapt":
