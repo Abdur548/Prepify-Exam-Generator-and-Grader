@@ -15,14 +15,24 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-function stubApi(paper: unknown = SHEET) {
+function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false) {
   const calls: { url: string; body?: unknown }[] = [];
+  let submits = 0;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const ok = (data: unknown) =>
       new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
     if (url === "/api/paper") return ok(paper);
-    if (url === "/api/attempts") return ok(RESULT);
+    if (url === "/api/disclosure/accept") return ok({ accepted: true });
+    if (url === "/api/attempts") {
+      submits += 1;
+      if (refuseFirstSubmit && submits === 1) {
+        return new Response(JSON.stringify({ detail: "Consent is needed before your answers are sent to the model." }),
+          { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+      return ok(RESULT);
+    }
+    if (url.endsWith("/remark")) return ok({ ...RESULT, totals: { ...RESULT.totals, unmarked: 0 } });
     if (url === `/api/attempts/${RESULT.attempt_id}`) return ok(RESULT);
     if (url.startsWith("/api/attempts/") && url.endsWith("/contest")) return ok(RESULT.items[1]);
     return new Response("{}", { status: 404 });
@@ -88,5 +98,32 @@ describe("taking a paper", () => {
     fireEvent.click(ui.getByRole("button", { name: "Paper" }));
     expect(await ui.findByText(/can't be taken/i)).toBeTruthy();
     expect(ui.queryByRole("button", { name: /take this paper/i })).toBeNull();
+  });
+
+  it("asks for consent when the server needs it, then sends the same answers", async () => {
+    const calls = stubApi(SHEET, true);
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(await openPaper(ui));
+    fireEvent.click(ui.getByLabelText(/Queue/));
+    fireEvent.change(container.querySelector("textarea")!, { target: { value: "level by level" } });
+    fireEvent.click(ui.getByRole("button", { name: /submit answers/i }));
+
+    fireEvent.click(await ui.findByRole("button", { name: /I understand/i }));
+    expect(await ui.findByText(/marked so far/)).toBeTruthy();
+    const posts = calls.filter((c) => c.url === "/api/attempts");
+    expect(posts).toHaveLength(2);
+    expect(posts[1].body).toEqual(posts[0].body);
+  });
+
+  it("retries marking from the results", async () => {
+    const calls = stubApi();
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(await openPaper(ui));
+    fireEvent.click(ui.getByRole("button", { name: /submit answers/i }));
+    fireEvent.click(await ui.findByRole("button", { name: /retry marking/i }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/remark"))).toBe(true));
+    await waitFor(() => expect(ui.queryByText(/marked so far/)).toBeNull());
   });
 });

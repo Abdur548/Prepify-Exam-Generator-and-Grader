@@ -65,6 +65,11 @@ export function contestMark(
   );
 }
 
+/** Marks the written answers that still have no mark at all. */
+export function remarkAttempt(attemptId: string): Promise<AttemptResult> {
+  return call(`/api/attempts/${encodeURIComponent(attemptId)}/remark`, { method: "POST" });
+}
+
 export function getSheet(sheetId: string): Promise<SheetDoc> {
   return call(`/api/sheets/${encodeURIComponent(sheetId)}`);
 }

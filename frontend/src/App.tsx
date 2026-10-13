@@ -7,7 +7,7 @@ import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
 import { AnswerSheet } from "./practice/AnswerSheet";
 import { Results } from "./practice/Results";
-import { contestMark, getAttempt, submitAttempt } from "./practice/api";
+import { ApiError, contestMark, getAttempt, remarkAttempt, submitAttempt } from "./practice/api";
 import { clearDraft } from "./practice/drafts";
 import type { AttemptResult, SheetDoc } from "./practice/types";
 import type { Plan } from "./plan/types";
@@ -46,6 +46,9 @@ export default function App() {
   const [attempt, setAttempt] = useState<AttemptResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Answers waiting on consent. The server refused them with 403 and nothing was
+  // stored, so they are held here and sent again, unchanged, once accepted.
+  const [awaitingConsent, setAwaitingConsent] = useState<Record<string, string> | null>(null);
   const [accepted, setAccepted] = useState(() => {
     try {
       return sessionStorage.getItem(ACCEPTED_KEY) === "yes";
@@ -99,6 +102,12 @@ export default function App() {
         setAttempt(result);
         setScreen("results");
       } catch (e) {
+        if (e instanceof ApiError && e.status === 403) {
+          setAwaitingConsent(responses);
+          setAccepted(false);
+          setScreen("disclosure");
+          return;
+        }
         setSubmitError(e instanceof Error ? e.message : "Your answers were not sent.");
       } finally {
         setSubmitting(false);
@@ -118,6 +127,11 @@ export default function App() {
     },
     [attempt],
   );
+
+  const remark = useCallback(async () => {
+    if (!attempt) return;
+    setAttempt(await remarkAttempt(attempt.attempt_id));
+  }, [attempt]);
 
   // Leaving mid-run is safe — the pipeline finishes regardless — but coming back
   // and pressing Generate again is not: the second run blocks on the process lock
@@ -198,9 +212,23 @@ export default function App() {
           <DisclosureScreen
             onAccepted={() => {
               remember();
+              if (awaitingConsent) {
+                const responses = awaitingConsent;
+                setAwaitingConsent(null);
+                setScreen("answer");
+                void submit(responses);
+                return;
+              }
               setScreen(run ? "generating" : "blueprint");
             }}
-            onBack={() => setScreen("blueprint")}
+            onBack={() => {
+              if (awaitingConsent) {
+                setAwaitingConsent(null);
+                setScreen("answer");
+                return;
+              }
+              setScreen("blueprint");
+            }}
           />
         )}
 
@@ -251,6 +279,7 @@ export default function App() {
             <Results
               result={attempt}
               onContest={contest}
+              onRemark={remark}
               onDone={() => setScreen("paper")}
             />
           </div>

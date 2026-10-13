@@ -21,10 +21,12 @@ import "./practice.css";
 interface Props {
   result: AttemptResult;
   onContest(slotId: string, marks: number): Promise<void>;
+  /** Marks the written answers still waiting. Absent: no retry is offered. */
+  onRemark?(): Promise<void>;
   onDone(): void;
 }
 
-export function Results({ result, onContest, onDone }: Props) {
+export function Results({ result, onContest, onRemark, onDone }: Props) {
   const { totals } = result;
   const pending = totals.unmarked > 0;
   return (
@@ -46,6 +48,7 @@ export function Results({ result, onContest, onDone }: Props) {
               .join(" · ")}
           </p>
         )}
+        {pending && onRemark && <RemarkButton onRemark={onRemark} />}
       </header>
 
       {(result.status === "degraded" || result.warnings.length > 0) && (
@@ -68,6 +71,34 @@ export function Results({ result, onContest, onDone }: Props) {
         </button>
       </footer>
     </article>
+  );
+}
+
+function RemarkButton({ onRemark }: { onRemark(): Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <p className="results__retry">
+      <button
+        type="button"
+        className="reveal"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            await onRemark();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Marking did not run.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Marking…" : "Retry marking"}
+      </button>
+      {error && <span className="results__error" role="alert">{error}</span>}
+    </p>
   );
 }
 

@@ -77,6 +77,11 @@ export function DisclosureScreen({ onAccepted, onBack }: Props) {
           they carry no source, so there is nothing of yours to check them
           against.
         </li>
+        <li>
+          <strong>Written answers are sent to the same model to be marked.</strong>{" "}
+          Its mark is a judgement against your material, not a verdict. You can
+          contest any mark, and the mark you give is the one that counts.
+        </li>
       </ol>
 
       <p className="disc__coda">

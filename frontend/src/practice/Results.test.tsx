@@ -6,9 +6,13 @@ import type { AttemptResult } from "./types";
 
 afterEach(cleanup);
 
-function setup(result: AttemptResult = RESULT, onContest = vi.fn().mockResolvedValue(undefined)) {
+function setup(
+  result: AttemptResult = RESULT,
+  onContest = vi.fn().mockResolvedValue(undefined),
+  onRemark?: () => Promise<void>,
+) {
   const { container } = render(
-    <Results result={result} onContest={onContest} onDone={vi.fn()} />,
+    <Results result={result} onContest={onContest} onRemark={onRemark} onDone={vi.fn()} />,
   );
   return { ui: within(container), container, onContest };
 }
@@ -99,5 +103,27 @@ describe("Results", () => {
   it("offers no contest on an unanswered question", () => {
     const { container } = setup();
     expect(row(container, "C-01").queryByRole("button", { name: /contest|mark it yourself/i })).toBeNull();
+  });
+
+  it("offers to retry marking while answers are waiting", () => {
+    const onRemark = vi.fn().mockResolvedValue(undefined);
+    const { ui } = setup(RESULT, undefined, onRemark);
+    fireEvent.click(ui.getByRole("button", { name: /retry marking/i }));
+    expect(onRemark).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no retry once everything is marked", () => {
+    const done = { ...RESULT, totals: { ...RESULT.totals, unmarked: 0 } };
+    const { ui } = setup(done, undefined, vi.fn());
+    expect(ui.queryByRole("button", { name: /retry marking/i })).toBeNull();
+  });
+
+  it("says why marking stopped", () => {
+    const degraded: AttemptResult = {
+      ...RESULT, status: "degraded",
+      warnings: ["Busy generating a paper. Your answers are saved — retry marking when it finishes."],
+    };
+    const { ui } = setup(degraded, undefined, vi.fn());
+    expect(ui.getByText(/Busy generating a paper/)).toBeTruthy();
   });
 });

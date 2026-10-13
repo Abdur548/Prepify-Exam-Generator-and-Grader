@@ -239,3 +239,15 @@
     align-items: stretch;
   }
 }
+
+.results__retry {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: var(--s-2) 0 0;
+  font-family: var(--face-tool);
+}
+
+.results__retry .reveal {
+  margin-left: 0;
+}
