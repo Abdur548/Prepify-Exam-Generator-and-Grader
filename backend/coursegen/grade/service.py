@@ -47,7 +47,7 @@ def submit_attempt(
     student-safe sentence saying why, and the written answers wait unmarked.
     The attempt and its objective marks are saved either way.
     """
-    _check_lengths(responses)
+    check_lengths(responses)
     sheet = store.get_sheet(sheet_id)
     attempt_id, _seq = store.add_attempt(sheet_id, responses, now)
 
@@ -72,6 +72,47 @@ def submit_attempt(
         else:
             warnings.append(NOT_MARKED_YET)
     return results(store, attempt_id, status=status, warnings=warnings)
+
+
+def remark(
+    store: Store,
+    attempt_id: str,
+    *,
+    marker: Optional[WrittenMarker],
+    unavailable: Optional[str] = None,
+    now: str,
+) -> dict[str, Any]:
+    """Mark the written answers that still have no mark at all.
+
+    "No mark at all" is deliberate: an answer the student marked themselves while
+    the model was unavailable carries a mark, and sending it to the model now
+    would make the model's mark the latest one — silently replacing the student's.
+    """
+    entries = written_entries(store, attempt_id, only_unmarked=True)
+    if not entries:
+        return results(store, attempt_id)
+    if marker is None:
+        return results(store, attempt_id, status="degraded",
+                       warnings=[unavailable or NOT_MARKED_YET])
+    outcome = marker(entries)
+    warnings = apply_written(store, attempt_id, outcome, now=now)
+    if outcome.degraded:
+        return results(store, attempt_id, status="degraded",
+                       warnings=[outcome.degraded, *warnings])
+    return results(store, attempt_id, warnings=warnings)
+
+
+def needs_marker(store: Store, sheet_id: str, responses: dict[str, str]) -> bool:
+    """Whether this submission would send anything to the model.
+
+    Only a non-blank answer to a written question does. A blank one is
+    unanswered, and an objective one is marked against the key.
+    """
+    sheet = store.get_sheet(sheet_id)
+    return any(
+        item.correct_option is None and responses.get(item.slot_id, "").strip()
+        for item in sheet.items
+    )
 
 
 def written_entries(
@@ -199,7 +240,7 @@ def _item_result(row: AnswerRow, sheet: SheetRecord) -> dict[str, Any]:
     }
 
 
-def _check_lengths(responses: dict[str, str]) -> None:
+def check_lengths(responses: dict[str, str]) -> None:
     for slot_id, text in responses.items():
         if not isinstance(text, str):
             raise InvalidSubmission(f"{slot_id}: an answer must be text.")

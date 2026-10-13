@@ -292,7 +292,7 @@ Errors on every practice route: unknown sheet or attempt **404** (detail names i
 request that cannot be honoured as sent **422** (detail safe to show); anything else
 **500** with no internals in the body.
 
-### `POST /api/attempts` → 200 / 404 / 422
+### `POST /api/attempts` → 200 / 403 / 404 / 422
 ```json
 {"sheet_id": "3f9c0a1b2d4e5f60",
  "answers": [{"slot_id": "A-01", "response": "B"}, {"slot_id": "B-01", "response": "…"}]}
@@ -300,6 +300,18 @@ request that cannot be honoured as sent **422** (detail safe to show); anything 
 Saves the attempt and marks objective questions against the key. An omitted slot is
 recorded as unanswered. 422 for a slot not on the sheet, the same slot twice, or a response
 over 4000 characters (refused, never truncated).
+
+**Written answers are marked by the model** (one call per 6 answers, at most 6 calls per
+submission), which sends them to it — so a submission with any non-blank written answer
+needs the same consent as generation: **403** without it, and nothing is stored. Objective
+answers and blank written ones need no consent and make no call.
+
+When the model cannot be used, the submission still succeeds as **200 `degraded`**: the
+attempt is saved, objective questions are marked, written answers are `unmarked`, and
+`warnings[0]` says why in a sentence safe to show — the pipeline was busy with another job,
+the call limit was reached, the model could not be reached, or no API key is configured. A
+written answer the model returned an invalid mark for twice is also left `unmarked`, with a
+warning naming the slot; marks are never clamped into range.
 
 The response is a **results** body:
 ```jsonc
@@ -337,6 +349,13 @@ The same results body, read back.
 student's mark becomes the mark that counts; the mark it replaced is kept as `original`.
 Any mark can be contested, objective ones included. 422 when the question was left
 unanswered or the mark is outside `0..marks_available`.
+
+### `POST /api/attempts/{attempt_id}/remark` → 200 / 403 / 404 / 409
+No body. Marks the written answers that still have **no mark at all** and returns the
+results body. An answer the student marked themselves is never re-sent — the model's mark
+would otherwise replace theirs. Nothing to mark: 200, no call, no consent needed. Consent
+missing: 403. Pipeline busy: **409** (unlike a submission, a retry carries nothing that
+could be lost by refusing it). A degraded run is a 200 `degraded`, as above.
 
 ### `GET /api/sheets/{sheet_id}` → 200 / 404
 The archived sheet document, verbatim: the paper shape, plus `sheet_id`.

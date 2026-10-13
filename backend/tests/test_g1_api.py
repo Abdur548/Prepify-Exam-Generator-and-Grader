@@ -101,9 +101,10 @@ class TestContest:
         assert res.status_code == 422
 
     def test_contesting_out_of_range_is_422(self, client) -> None:
-        body = _submit(client, _paper_sheet_id(), {"B-01": "q"}).json()
+        # An objective question: a written answer would need consent (G2).
+        body = _submit(client, _paper_sheet_id(), {"A-01": "A"}).json()
         res = client.post(f"/api/attempts/{body['attempt_id']}/contest",
-                          json={"slot_id": "B-01", "marks_awarded": 99})
+                          json={"slot_id": "A-01", "marks_awarded": 99})
         assert res.status_code == 422
 
 
