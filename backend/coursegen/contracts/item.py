@@ -45,6 +45,17 @@ class ItemSpec(BaseModel):
     # message only — never the system prompt (L10). See the SectionSpec field
     # for the S2 injection note.
     generation_instructions: Optional[str] = None
+    # MVP 2 (§8.2). Stems the student has already been shown for this node; the
+    # model is asked for a DIFFERENT question on the same passage. Set only by
+    # `grade/tilt.py::avoid_repeats` and the review builder, never by the solver,
+    # so every spec a blueprint produces carries None.
+    #
+    # It changes the prompt, so it changes the cache key — but through
+    # `exam/allocate.py::avoid_spec_hash`, which chains a digest of the stems onto
+    # the spec's existing hash, rather than through `_spec_hash`, whose inputs
+    # include `options_count`, which a spec does not carry. Same guarantee as the
+    # fields below: the key changes only when the field is set.
+    avoid_stems: Optional[list[str]] = None
     # sha256(node_id + span_ids + item_type + bloom + marks + options_count
     #        [+ format_requirement, + grounding, + generation_instructions —
     #         each appended only when it is set / non-default]) — cache key.

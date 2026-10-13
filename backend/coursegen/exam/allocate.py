@@ -10,6 +10,7 @@ and the LLM only phrases what code specifies.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import defaultdict
@@ -639,6 +640,23 @@ def _topic_scores(topic: str, nodes: list[CourseMapNode]) -> dict[str, float]:
         n.node_id: sum(idf[tok] for tok in sorted(topic_tokens & _node_tokens(n)))
         for n in nodes
     }
+
+
+def avoid_spec_hash(base_hash: str, avoid_stems: list[str]) -> str:
+    """The cache key of a spec that asks for new wording (MVP 2, §8.2).
+
+    Chained onto the spec's own hash rather than folded into `_spec_hash`, so
+    every hash the solver produces stays exactly what it was — the trap
+    `format_requirement` and `grounding` were each appended-only-when-set to
+    avoid. The stems are sorted and JSON-encoded, so their order does not matter
+    and two stems can never run together into one.
+
+    An empty list is refused: it would produce a new key for an unchanged prompt.
+    """
+    if not avoid_stems:
+        raise ValueError("avoid_spec_hash needs at least one stem to avoid.")
+    payload = base_hash + "|avoid|" + json.dumps(sorted(avoid_stems), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _spec_hash(
