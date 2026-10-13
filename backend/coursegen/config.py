@@ -510,3 +510,47 @@ def call_ledger_path() -> Path:
     exactly what a mutation run did before this existed.
     """
     return OUTPUT_DIR / CALL_LEDGER_NAME
+
+
+# ---------------------------------------------------------------------------
+# MVP 2 — grading and adaptive practice (docs/MVP2-GRADER-DESIGN.md §11)
+#
+# Every value below is UNCALIBRATED — a starting value, not a measurement, in the
+# same convention as SYNTHESIS_ITEM_WARN_RATIO. §13 says how each gets measured.
+# ---------------------------------------------------------------------------
+# The student's answers, marks and history. Under OUTPUT_DIR, which is gitignored,
+# so a student's answers can never be committed.
+DB_NAME: str = "prepify.db"
+
+
+def db_path() -> Path:
+    """Resolved when called, never at import — the same reason as `call_ledger_path`.
+
+    `conftest.py` replaces this outright, so no test can write a real student's
+    practice history.
+    """
+    return OUTPUT_DIR / DB_NAME
+
+
+# A score below this creates a re-test card, and fails a re-test. Any wrong
+# objective answer qualifies; so does a written answer under 60%.
+RETEST_BELOW: float = 0.6
+# How far one answer moves a node's mastery: m <- m + alpha * (score - m).
+MASTERY_ALPHA: float = 0.5
+# The mass multiplier for a node the student failed (m = 0) and one they have
+# mastered (m = 1). Untested nodes are left at 1.0 — untested is not weak.
+TILT_MAX: float = 2.0
+TILT_MIN: float = 0.25
+# Attempts that must pass since a card was last tested before it is due again,
+# by Leitner box. Box 1 is due at the very next review. Measured in ATTEMPTS, not
+# days — an accepted trade-off (§7.3): five attempts in one evening space
+# re-tests minutes apart, so this must never be presented as time-based spacing.
+LEITNER_GAPS: dict[int, int] = {1: 0, 2: 2, 3: 4, 4: 8}
+REVIEW_MAX_ITEMS: int = 10
+# Written answers per marking call, and marking calls per submission. Six
+# covers the batches plus their single retries for every shipped blueprint.
+GRADE_BATCH_SIZE: int = 6
+PER_SUBMISSION_CALL_CAP: int = 6
+# Longest answer accepted. Longer is refused, never silently truncated.
+MAX_ANSWER_CHARS: int = 4000
+GRADE_REASON_MAX_CHARS: int = 300

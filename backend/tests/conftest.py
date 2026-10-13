@@ -30,6 +30,21 @@ def isolated_call_ledger(tmp_path, monkeypatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def isolated_practice_db(tmp_path, monkeypatch) -> Path:
+    """No test may read or write a real student's practice history.
+
+    Same reasoning as the call ledger above: the database lives under
+    `OUTPUT_DIR`, and a test that archives a paper or submits an attempt without
+    redirecting it would write into the student's own record — and, worse, a
+    test asserting on history would pass or fail according to what the student
+    happened to have practised.
+    """
+    path = tmp_path / config.DB_NAME
+    monkeypatch.setattr(config, "db_path", lambda: path)
+    return path
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--live",
