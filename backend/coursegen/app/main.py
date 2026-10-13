@@ -1016,3 +1016,13 @@ def _run_chat_query(query: str, history: list[tuple[str, str]]) -> dict[str, Any
         "citations": answer.citations,
         "from_material": answer.from_material,
     }
+
+
+# ---------------------------------------------------------------------------
+# Practice: attempts, marks, contests, progress and review (MVP 2)
+# ---------------------------------------------------------------------------
+# Imported last: the router reads this module's consent state and pipeline lock
+# at call time, so it must not be imported before they exist.
+from coursegen.app.practice import router as practice_router  # noqa: E402
+
+app.include_router(practice_router)

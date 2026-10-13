@@ -280,6 +280,69 @@ Test seam. **Not for the UI.**
 
 ---
 
+## Practice (MVP 2)
+
+Added 2026-10-13. Design: `MVP2-GRADER-DESIGN.md`. Every generated paper is archived as a
+**sheet** under a content hash, and `GET /api/paper` now carries its `sheet_id` (`null` when
+archiving failed — the paper is then readable but cannot be taken, and `summary.warnings`
+says so). Each filled paper item also gains `node_id` and `topic` (its heading path, e.g.
+`"Lecture 3 › 3.2 Search"`, `null` when unknown).
+
+Errors on every practice route: unknown sheet or attempt **404** (detail names it); a
+request that cannot be honoured as sent **422** (detail safe to show); anything else
+**500** with no internals in the body.
+
+### `POST /api/attempts` → 200 / 404 / 422
+```json
+{"sheet_id": "3f9c0a1b2d4e5f60",
+ "answers": [{"slot_id": "A-01", "response": "B"}, {"slot_id": "B-01", "response": "…"}]}
+```
+Saves the attempt and marks objective questions against the key. An omitted slot is
+recorded as unanswered. 422 for a slot not on the sheet, the same slot twice, or a response
+over 4000 characters (refused, never truncated).
+
+The response is a **results** body:
+```jsonc
+{
+  "attempt_id": "…", "sheet_id": "…", "sheet_kind": "paper",   // or "review"
+  "status": "ok",                                               // or "degraded"
+  "totals": {"marks_awarded": 31, "marks_marked": 44, "marks_available": 60,
+             "unmarked": 2, "unanswered": 1},
+  "items": [{
+    "slot_id": "B-02", "item_type": "short", "marks_available": 4, "response": "…",
+    "status": "marked",                  // marked | unmarked | unanswered
+    "marks_awarded": 3, "source": "student", "confidence": "low", "reason": "…",
+    "original": {"marks_awarded": 2, "source": "model"},   // null unless contested
+    "objective_contest": false,          // true: the student disagrees with the answer KEY
+    "form": null,                        // review items: identical | fresh | fallback
+    "feedback": {"stem": "…", "options": [], "correct_option": null, "model_answer": "…",
+                 "explanation": "…", "from_material": true, "topic": "…",
+                 "revise": {"file": "03_search.pdf", "pages": [30]}, "source_excerpt": "…"}
+  }],
+  "warnings": []
+}
+```
+**Read the totals against `marks_marked`, never `marks_available`.** An unmarked answer
+is not a zero: "31 / 44 marked so far" is true where "31 / 60" is not. A blank answer
+*has* been marked (zero), so it counts in `marks_marked`. `revise` and `source_excerpt`
+are `null` for synthesis questions — there is no page in the student's material to send
+them to. **Never present a mark with `source: "model"` as correct or verified**; the copy
+is "marked by the model against your material — contest any mark."
+
+### `GET /api/attempts/{attempt_id}` → 200 / 404
+The same results body, read back.
+
+### `POST /api/attempts/{attempt_id}/contest` → 200 / 404 / 422
+`{"slot_id": "B-02", "marks_awarded": 3}` → the one item, in the results-item shape. The
+student's mark becomes the mark that counts; the mark it replaced is kept as `original`.
+Any mark can be contested, objective ones included. 422 when the question was left
+unanswered or the mark is outside `0..marks_available`.
+
+### `GET /api/sheets/{sheet_id}` → 200 / 404
+The archived sheet document, verbatim: the paper shape, plus `sheet_id`.
+
+---
+
 ## Rules for anything built on this
 
 1. **Never say a question is verified, accurate, grounded, or fact-checked.** Nothing in
