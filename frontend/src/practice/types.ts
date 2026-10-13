@@ -77,3 +77,34 @@ export interface AttemptResult {
   items: ItemResult[];
   warnings: string[];
 }
+
+export interface NodeProgress {
+  node_id: string;
+  topic: string;
+  mastery: number;
+  answers: number;
+}
+
+export interface LectureProgress {
+  lecture: string;
+  /** Null when no question from this lecture has been answered: untested, not zero. */
+  mastery: number | null;
+  /** How much of the lecture, by instructional mass, has been tested at all. */
+  tested_share: number;
+  nodes_total: number;
+  nodes_tested: number;
+  /** Tested nodes only. */
+  nodes: NodeProgress[];
+}
+
+/** Mirrors `backend/coursegen/grade/service.py::progress`. */
+export interface Progress {
+  attempts: number;
+  lectures: LectureProgress[];
+  cards: Record<string, number>;
+  /** Every re-test that is due. */
+  due: number;
+  /** How many the next review set will hold — capped, one per passage. */
+  next_review: number;
+  warnings: string[];
+}

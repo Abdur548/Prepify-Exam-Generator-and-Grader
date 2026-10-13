@@ -33,6 +33,12 @@ function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false) {
       return ok(RESULT);
     }
     if (url.endsWith("/remark")) return ok({ ...RESULT, totals: { ...RESULT.totals, unmarked: 0 } });
+    if (url === "/api/progress") {
+      return ok({ attempts: 1, due: 1, next_review: 1, warnings: [],
+                  cards: { box_1: 1, box_2: 0, box_3: 0, box_4: 0, retired: 0 },
+                  lectures: [{ lecture: "03_search.pdf", mastery: 0.5, tested_share: 0.25,
+                               nodes_total: 4, nodes_tested: 1, nodes: [] }] });
+    }
     if (url === `/api/attempts/${RESULT.attempt_id}`) return ok(RESULT);
     if (url.startsWith("/api/attempts/") && url.endsWith("/contest")) return ok(RESULT.items[1]);
     return new Response("{}", { status: 404 });
@@ -125,5 +131,23 @@ describe("taking a paper", () => {
     fireEvent.click(await ui.findByRole("button", { name: /retry marking/i }));
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/remark"))).toBe(true));
     await waitFor(() => expect(ui.queryByText(/marked so far/)).toBeNull());
+  });
+
+  it("opens the progress tab", async () => {
+    stubApi();
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(ui.getByRole("button", { name: "Progress" }));
+    expect(await ui.findByText(/50% mastery · 25% of the material tested/)).toBeTruthy();
+  });
+
+  it("goes to progress when the student is done with their marks", async () => {
+    stubApi();
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(await openPaper(ui));
+    fireEvent.click(ui.getByRole("button", { name: /submit answers/i }));
+    fireEvent.click(await ui.findByRole("button", { name: /^done$/i }));
+    expect(await ui.findByRole("heading", { name: /your progress/i })).toBeTruthy();
   });
 });

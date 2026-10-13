@@ -43,6 +43,7 @@ from coursegen.grade.service import (
     check_lengths,
     contest,
     needs_marker,
+    progress,
     remark,
     results,
     submit_attempt,
@@ -185,6 +186,20 @@ def post_remark(attempt_id: str) -> dict[str, Any]:
             if busy:
                 raise HTTPException(status_code=409, detail=busy)
             return remark(store, attempt_id, marker=_new_marker(), now=_now())
+
+
+@router.get("/progress")
+def get_progress() -> dict[str, Any]:
+    from coursegen import config
+    from coursegen.ingest.coursemap import load_course_map
+
+    if not config.COURSE_MAP_PATH.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="No course material has been ingested yet. Upload your notes first.",
+        )
+    with _errors(), Store() as store:
+        return progress(store, load_course_map(config.COURSE_MAP_PATH))
 
 
 @router.get("/sheets/{sheet_id}")

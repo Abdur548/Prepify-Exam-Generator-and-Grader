@@ -6,6 +6,7 @@ import { DisclosureScreen } from "./system/DisclosureScreen";
 import { GeneratingScreen } from "./generate/GeneratingScreen";
 import { Paper } from "./paper/Paper";
 import { AnswerSheet } from "./practice/AnswerSheet";
+import { ProgressScreen } from "./practice/ProgressScreen";
 import { Results } from "./practice/Results";
 import { ApiError, contestMark, getAttempt, remarkAttempt, submitAttempt } from "./practice/api";
 import { clearDraft } from "./practice/drafts";
@@ -28,7 +29,8 @@ type Screen =
   | "paper"
   | "chat"
   | "answer"
-  | "results";
+  | "results"
+  | "progress";
 
 // The gate lives in the server's process memory and resets on restart, so this is
 // a hint about what the server probably thinks — never the authority. A stale
@@ -182,6 +184,13 @@ export default function App() {
           >
             Ask
           </button>
+          <button
+            className={screen === "progress" ? "on" : ""}
+            disabled={busy}
+            onClick={() => setScreen("progress")}
+          >
+            Progress
+          </button>
         </nav>
         {screen === "paper" && paper && (
           <label className="harness__filter">
@@ -274,13 +283,19 @@ export default function App() {
           </div>
         )}
 
+        {screen === "progress" && (
+          <div className="harness__main">
+            <ProgressScreen />
+          </div>
+        )}
+
         {screen === "results" && attempt && (
           <div className="harness__main">
             <Results
               result={attempt}
               onContest={contest}
               onRemark={remark}
-              onDone={() => setScreen("paper")}
+              onDone={() => setScreen("progress")}
             />
           </div>
         )}

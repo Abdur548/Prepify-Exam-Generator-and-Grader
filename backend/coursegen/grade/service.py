@@ -15,8 +15,18 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from dataclasses import asdict
+
 from coursegen import config
+from coursegen.contracts.course_map import CourseMapNode
 from coursegen.grade.mark import mark_objective
+from coursegen.grade.mastery import (
+    cards,
+    lecture_rollup,
+    node_mastery,
+    select_review,
+    split_orphans,
+)
 from coursegen.grade.records import (
     AnswerRow,
     InvalidSubmission,
@@ -237,6 +247,39 @@ def _item_result(row: AnswerRow, sheet: SheetRecord) -> dict[str, Any]:
             "revise": doc.get("source") if from_material else None,
             "source_excerpt": doc.get("source_excerpt") if from_material else None,
         },
+    }
+
+
+def progress(store: Store, nodes: list[CourseMapNode]) -> dict[str, Any]:
+    """Where the student stands, per lecture, and what is due for review.
+
+    Derived from the whole history each time. Answers about material that is no
+    longer ingested are left out and counted, never silently dropped.
+    """
+    rows, orphans = split_orphans(store.all_answer_rows(), {n.node_id for n in nodes})
+    all_cards = cards(rows)
+    latest = store.latest_seq()
+    live = [c for c in all_cards.values() if not c.retired]
+    warnings = []
+    if orphans:
+        warnings.append(
+            f"{orphans} answer{'s' if orphans != 1 else ''} refer to material that is no "
+            "longer ingested; they are left out."
+        )
+    return {
+        "attempts": latest,
+        "lectures": [asdict(l) for l in lecture_rollup(node_mastery(rows), nodes)],
+        "cards": {
+            **{f"box_{b}": sum(1 for c in live if c.box == b) for b in sorted(config.LEITNER_GAPS)},
+            "retired": len(all_cards) - len(live),
+        },
+        # Every card that is due, and how many the next review set will hold — the
+        # second is capped and takes one question per passage, so it can be fewer.
+        "due": sum(1 for c in live if c.is_due(latest)),
+        "next_review": len(select_review(
+            all_cards, latest, {n.node_id: n.instructional_mass for n in nodes}
+        )),
+        "warnings": warnings,
     }
 
 

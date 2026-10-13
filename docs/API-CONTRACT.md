@@ -357,6 +357,31 @@ would otherwise replace theirs. Nothing to mark: 200, no call, no consent needed
 missing: 403. Pipeline busy: **409** (unlike a submission, a retry carries nothing that
 could be lost by refusing it). A degraded run is a 200 `degraded`, as above.
 
+### `GET /api/progress` → 200 / 409
+Where the student stands, derived from their whole answer history each time it is asked
+for — nothing about it is stored. 409 when no material has been ingested.
+```jsonc
+{
+  "attempts": 3,
+  "lectures": [{
+    "lecture": "03_search.pdf",
+    "mastery": 0.625,          // null: nothing from this lecture answered yet — untested, NOT zero
+    "tested_share": 0.4,       // share of the lecture, by instructional mass, tested at all
+    "nodes_total": 12, "nodes_tested": 5,
+    "nodes": [{"node_id": "…", "topic": "03_search.pdf › BFS", "mastery": 0.25, "answers": 2}]
+  }],
+  "cards": {"box_1": 3, "box_2": 1, "box_3": 0, "box_4": 0, "retired": 1},
+  "due": 4,                    // every re-test that is due
+  "next_review": 2,            // what the next review set will hold: capped at 10, one per passage
+  "warnings": []
+}
+```
+Node mastery moves halfway toward each new score (`m ← m + 0.5·(s − m)`); a blank answer
+scores 0, an unmarked one is skipped. **Show `mastery` beside `tested_share`, never alone**,
+and never present a `null` mastery as 0. Re-tests are spaced in **attempts, not days** (next
+review, then 2, 4 and 8 attempts later) — do not describe it as time-based. Answers about
+material that is no longer ingested are left out and counted in `warnings`.
+
 ### `GET /api/sheets/{sheet_id}` → 200 / 404
 The archived sheet document, verbatim: the paper shape, plus `sheet_id`.
 
