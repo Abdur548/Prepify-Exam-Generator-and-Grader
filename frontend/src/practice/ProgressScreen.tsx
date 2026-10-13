@@ -74,7 +74,7 @@ export function ProgressScreen({ load = getProgress, onStartReview, onNextPaper 
             )}
             {onNextPaper && (
               <button type="button" className="reveal" onClick={onNextPaper}>
-                Next paper, aimed at my weak topics
+                Next paper, built on my answers
               </button>
             )}
           </div>

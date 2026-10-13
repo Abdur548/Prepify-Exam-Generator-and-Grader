@@ -164,16 +164,20 @@ describe("taking a paper", () => {
     expect(await ui.findByRole("heading", { name: /your progress/i })).toBeTruthy();
   });
 
-  it("aims the next paper at weak topics from the progress tab", async () => {
+  it("builds the next paper on the student's answers, from the progress tab", async () => {
     const calls = stubApi();
     const { container } = render(<App />);
     const ui = within(container);
     fireEvent.click(ui.getByRole("button", { name: "Progress" }));
-    fireEvent.click(await ui.findByRole("button", { name: /next paper, aimed at my weak topics/i }));
+    fireEvent.click(await ui.findByRole("button", { name: /next paper, built on my answers/i }));
 
-    const box = (await ui.findByLabelText(/aim at my weak topics/i)) as HTMLInputElement;
+    const box = (await ui.findByLabelText(/build on my answers so far/i)) as HTMLInputElement;
     expect(box.checked).toBe(true);
-    expect(await ui.findByText(/2 questions moved toward your weak topics/i)).toBeTruthy();
+    expect(await ui.findByText(/2 questions moved off material you have mastered/i)).toBeTruthy();
+    // E9 (P6-EVALUATION.md): the tilt keeps weak material and swaps mastered material
+    // for untested material. It does not concentrate on weak topics, so nothing on
+    // screen may say it does.
+    expect(container.textContent).not.toMatch(/weak topics/i);
     await waitFor(() =>
       expect(calls.some((c) => c.url === "/api/plan" && (c.body as { adaptive?: boolean })?.adaptive === true)).toBe(true),
     );

@@ -26,7 +26,7 @@ interface Props {
    *  the dry run the student just read, so it must not re-fetch and risk showing
    *  them a different set of numbers than the ones they pressed Generate on. */
   onGenerate?: (blueprintId: string, plan: Plan) => void;
-  /** Aim the paper at the student's weak topics (MVP 2). */
+  /** Build the paper on the student's answers so far (MVP 2). */
   adaptive?: boolean;
   onAdaptiveChange?: (adaptive: boolean) => void;
 }
@@ -142,11 +142,15 @@ export function BlueprintScreen({ onGenerate, adaptive = false, onAdaptiveChange
                 onChange={(e) => onAdaptiveChange(e.target.checked)}
               />
               <span>
-                <span className="adapt__label">Aim at my weak topics</span>
+                <span className="adapt__label">Build on my answers so far</span>
+                {/* Worded to what E9 measured (P6-EVALUATION.md): the tilt keeps
+                    weak material in and swaps mastered material for untested
+                    material. It does not drill weak topics harder, so the copy
+                    must not say it does. */}
                 <span className="field__why">
-                  Uses your marks so far: weak material is asked about more,
-                  mastered material less, and questions you have already seen come
-                  back in new words.
+                  Keeps the material you got wrong, swaps out what you have
+                  mastered for material you have not been tested on yet, and asks
+                  questions you have already seen in new words.
                 </span>
               </span>
             </label>
@@ -277,7 +281,7 @@ export function BlueprintScreen({ onGenerate, adaptive = false, onAdaptiveChange
                 {plan.adaptive && (
                   <p className="adapt__note" role="status">
                     {plan.adaptive.applied
-                      ? `${plan.adaptive.changed_slots} question${plan.adaptive.changed_slots === 1 ? "" : "s"} moved toward your weak topics; ${plan.adaptive.reworded} already seen will come back in new words.`
+                      ? `${plan.adaptive.changed_slots} question${plan.adaptive.changed_slots === 1 ? "" : "s"} moved off material you have mastered; ${plan.adaptive.reworded} already seen will come back in new words.`
                       : "No answers yet — this paper is not adapted. Take a paper first."}
                   </p>
                 )}

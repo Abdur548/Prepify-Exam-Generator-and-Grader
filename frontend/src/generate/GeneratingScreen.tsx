@@ -33,7 +33,7 @@ import "./generate.css";
 
 interface Props {
   blueprintId: string;
-  /** Aim the paper at the student's weak topics (MVP 2). */
+  /** Build the paper on the student's answers so far (MVP 2). */
   adaptive?: boolean;
   plan: Plan;
   onDone: (paper: PaperDoc, outcome: RunOutcome) => void;

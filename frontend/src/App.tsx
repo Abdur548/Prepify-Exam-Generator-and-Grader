@@ -40,7 +40,7 @@ const ACCEPTED_KEY = "prepify.disclosure";
 export default function App() {
   const [screen, setScreen] = useState<Screen>("blueprint");
   const [run, setRun] = useState<{ blueprintId: string; plan: Plan; adaptive: boolean } | null>(null);
-  // MVP 2: aim the next paper at the student's weak topics.
+  // MVP 2: build the next paper on the student's answers so far.
   const [adaptive, setAdaptive] = useState(false);
   const [paper, setPaper] = useState<PaperDoc | null>(null);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
