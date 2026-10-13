@@ -26,6 +26,7 @@ from coursegen.exam.coverage import build_report
 def solve(
     course_map: list[CourseMapNode],
     blueprint: Blueprint,
+    mass_tilt: Optional[dict[str, float]] = None,
 ) -> tuple[list[ItemSpec], CoverageReport]:
     """
     Deterministic solver: identical inputs → byte-identical ItemSpec[].
@@ -35,7 +36,22 @@ def solve(
     - Span exhaustion produces warnings + unfilled slots, never a crash (R3).
     - Sections are SOLVED most-constrained-first but EMITTED in blueprint order.
     - No LLM calls. No randomness.
+
+    `mass_tilt` (MVP 2, §8.1) multiplies a node's `instructional_mass` before each
+    section's renormalisation — a student's weak nodes up, mastered ones down. A
+    node absent from it keeps its mass. With no tilt this is exactly the solver the
+    P6 evaluation measured. The tilt steers the MASS-placed slots only: fall-through
+    (`_pick_node`'s fallback, by node_id) is deliberately untouched, because that
+    ordering is part of the evaluated solver.
     """
+    for node_id, factor in (mass_tilt or {}).items():
+        # A zero tilt would silently delete a node; NaN would poison every share
+        # it touched. Neither may pass for a weighting.
+        if not (isinstance(factor, (int, float)) and math.isfinite(factor) and factor > 0):
+            raise ValueError(
+                f"mass_tilt for node {node_id!r} must be a positive finite number, "
+                f"got {factor!r}."
+            )
     sorted_nodes = sorted(course_map, key=lambda n: n.node_id)
 
     # Shared span registry across all sections — enforces paper-wide uniqueness.
@@ -72,6 +88,7 @@ def solve(
             used_spans=used_spans,
             node_slot_map=node_slot_map,
             node_marks_map=node_marks_map,
+            mass_tilt=mass_tilt or {},
         )
 
     # Emission order: ORIGINAL blueprint position, then slot number within the section.
@@ -120,6 +137,7 @@ def _solve_section(
     used_spans: set[str],
     node_slot_map: dict[str, list[str]],
     node_marks_map: dict[str, int],
+    mass_tilt: Optional[dict[str, float]] = None,
 ) -> tuple[
     list[ItemSpec], list[str], list[str], int, int, Optional[TopicCoverage]
 ]:
@@ -267,12 +285,18 @@ def _solve_section(
                 f"a fraction in [0, 1]."
             )
 
-    # Step 2: renormalise mass over the candidate set.
-    total_mass = sum(n.instructional_mass for n in candidates)
+    # Step 2: renormalise mass over the candidate set, tilted per node when the
+    # caller supplies one (MVP 2). Multiplying by 1.0 is exact in IEEE 754, so an
+    # absent tilt leaves every share bit-for-bit what it was.
+    tilt = mass_tilt or {}
+    weighted = {
+        n.node_id: n.instructional_mass * tilt.get(n.node_id, 1.0) for n in candidates
+    }
+    total_mass = sum(weighted.values())
     if total_mass == 0:
         masses = {n.node_id: 1.0 / len(candidates) for n in candidates}
     else:
-        masses = {n.node_id: n.instructional_mass / total_mass for n in candidates}
+        masses = {nid: w / total_mass for nid, w in weighted.items()}
 
     # Step 3: Hare quota apportionment.
     allocation = _hare_apportionment(masses, section.count)
