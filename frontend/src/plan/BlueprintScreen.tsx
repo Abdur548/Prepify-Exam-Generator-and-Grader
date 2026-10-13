@@ -281,7 +281,7 @@ export function BlueprintScreen({ onGenerate, adaptive = false, onAdaptiveChange
                 {plan.adaptive && (
                   <p className="adapt__note" role="status">
                     {plan.adaptive.applied
-                      ? `${plan.adaptive.changed_slots} question${plan.adaptive.changed_slots === 1 ? "" : "s"} moved off material you have mastered; ${plan.adaptive.reworded} already seen will come back in new words.`
+                      ? `${plan.adaptive.changed_slots} question${plan.adaptive.changed_slots === 1 ? "" : "s"} now cover different material; ${plan.adaptive.reworded} you have already seen will come back in new words.`
                       : "No answers yet — this paper is not adapted. Take a paper first."}
                   </p>
                 )}

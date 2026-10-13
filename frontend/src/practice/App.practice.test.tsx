@@ -195,7 +195,9 @@ describe("taking a paper", () => {
 
     const box = (await ui.findByLabelText(/build on my answers so far/i)) as HTMLInputElement;
     expect(box.checked).toBe(true);
-    expect(await ui.findByText(/2 questions moved off material you have mastered/i)).toBeTruthy();
+    // `changed_slots` counts slots whose material changed for any reason, so the
+    // copy says exactly that and no more.
+    expect(await ui.findByText(/2 questions now cover different material/i)).toBeTruthy();
     // E9 (P6-EVALUATION.md): the tilt keeps weak material and swaps mastered material
     // for untested material. It does not concentrate on weak topics, so nothing on
     // screen may say it does.

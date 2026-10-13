@@ -54,7 +54,8 @@ export function DisclosureScreen({ onAccepted, onBack }: Props) {
       <h1 className="disc__title">Before your first paper</h1>
       <p className="disc__lead">
         Prepify writes questions with a language model, from the slides you
-        uploaded. Three things are true of every paper it makes.
+        uploaded. Three things are true of every paper it makes, and one of every
+        mark it gives.
       </p>
 
       <ol className="disc__points">
