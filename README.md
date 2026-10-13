@@ -115,7 +115,7 @@ it. Design: `docs/MVP2-GRADER-DESIGN.md`.
 
 ```bash
 cd backend  && python -m pytest        # 913 tests, no network
-cd frontend && npm test               # 71 tests
+cd frontend && npm test               # 72 tests
 cd frontend && npm run build          # typecheck + production build
 ```
 

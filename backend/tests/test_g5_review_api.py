@@ -130,3 +130,31 @@ class TestReviewRoute:
         assert res.status_code == 200 and res.json()["sheet_kind"] == "review"
         assert res.json()["items"][0]["marks_awarded"] == 2
         assert res.json()["items"][0]["form"] == "identical"
+
+
+class TestRewordingNeverCrashesTheReview:
+    """Final review finding: loading the reranker or BGE-M3 can fail (the memory
+    guard has refused BGE-M3 on this machine). The review has a labelled fallback
+    for exactly this — the original question — so it must not become a 500."""
+
+    def test_a_model_that_will_not_load_falls_back(self, monkeypatch, tmp_path) -> None:
+        from fastapi.testclient import TestClient
+
+        from coursegen.app.main import app
+
+        monkeypatch.setenv("GEMINI_API_KEY", _TEST_API_KEY)
+        monkeypatch.setattr(config, "COURSE_MAP_PATH", tmp_path / "course_map.json")
+        save_course_map(_nodes(), config.COURSE_MAP_PATH)
+        with Store() as store:
+            _make_fresh_due(store)
+        with patch("coursegen.app.main.run_preflight_checks"), \
+             patch("coursegen.app.main._get_reranker",
+                   side_effect=RuntimeError("not enough memory to load the model")):
+            with TestClient(app) as c:
+                c.post("/api/internal/reset-disclosure")
+                c.post("/api/disclosure/accept")
+                res = c.post("/api/review")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["fallbacks"] == 1 and body["warnings"]
+        assert body["sheet"]["sections"][0]["items"][0]["form"] == "fallback"

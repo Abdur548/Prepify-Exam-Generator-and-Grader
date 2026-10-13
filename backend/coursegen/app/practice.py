@@ -241,6 +241,13 @@ def _new_generator(nodes: list) -> FreshGenerator:
         except (BudgetExceeded, httpx.HTTPError, EnvironmentError) as exc:
             logger.warning("Review re-wording unavailable: %s", type(exc).__name__)
             return {}
+        except Exception:
+            # Anything else — a model that will not load (the memory guard has
+            # refused BGE-M3 on real machines), a Qdrant lock — still has a
+            # labelled answer: the original question. The traceback goes to the
+            # log so a real bug stays visible; the student gets their review.
+            logger.exception("Review re-wording failed; serving the originals")
+            return {}
         return {item.slot_id: item for item in result.items}
 
     return generate
