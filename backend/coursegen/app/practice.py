@@ -12,7 +12,8 @@ exactly one of each, whichever route a request arrives by.
 | `UnknownSheet`, `UnknownAttempt` | 404 |
 | `InvalidSubmission` | 422, detail safe to show |
 | a written answer sent without consent | 403 |
-| a retry of marking while the pipeline is busy | 409 |
+| a retry of marking, or a review that needs the model, while the pipeline is busy | 409 |
+| a review with no material ingested | 409 |
 | anything else | 500, logged; the body says nothing about the server |
 
 ## Why a busy pipeline is degraded on submit but 409 on retry
@@ -49,6 +50,7 @@ from coursegen.grade.service import (
     submit_attempt,
     written_entries,
 )
+from coursegen.grade.review import FreshGenerator, build_review, needs_model
 from coursegen.grade.store import Store
 from coursegen.grade.written import make_marker
 
@@ -99,24 +101,28 @@ def _require_consent() -> None:
 
 
 @contextmanager
-def _marking_slot() -> Iterator[Optional[str]]:
-    """Hold the pipeline lock for a marking call, without waiting for it.
+def _pipeline_slot(label: str) -> Iterator[Optional[str]]:
+    """Hold the pipeline lock for a model call, without waiting for it.
 
-    Yields None when held, or a student-safe sentence when another job has it.
-    Marking calls the model like generation and chat do, so it takes the same
-    lock: the daily call ledger is safe only with one writer at a time.
+    Yields None when held, or what holds it ("generating a paper") when another
+    job does. Marking and re-wording call the model like generation and chat do,
+    so they take the same lock: the daily call ledger is safe only with one
+    writer at a time, and re-wording also reads Qdrant, which ingest locks.
     """
     main = _main()
     if not main._PIPELINE_LOCK.acquire(blocking=False):
-        holder = main._pipeline_holder or "with another job"
-        yield (f"Busy {holder}. Your answers are saved — retry marking when it finishes.")
+        yield main._pipeline_holder or "with another job"
         return
-    main._pipeline_holder = "marking answers"
+    main._pipeline_holder = label
     try:
         yield None
     finally:
         main._pipeline_holder = ""
         main._PIPELINE_LOCK.release()
+
+
+def _busy_marking(holder: str) -> str:
+    return f"Busy {holder}. Your answers are saved — retry marking when it finishes."
 
 
 @contextmanager
@@ -157,10 +163,11 @@ def post_attempt(request: AttemptIn) -> dict[str, Any]:
         if not needs_marker(store, request.sheet_id, responses):
             return submit_attempt(store, request.sheet_id, responses, now=_now())
         _require_consent()
-        with _marking_slot() as busy:
+        with _pipeline_slot("marking answers") as busy:
             return submit_attempt(
                 store, request.sheet_id, responses, now=_now(),
-                marker=None if busy else _new_marker(), unavailable=busy,
+                marker=None if busy else _new_marker(),
+                unavailable=_busy_marking(busy) if busy else None,
             )
 
 
@@ -182,14 +189,13 @@ def post_remark(attempt_id: str) -> dict[str, Any]:
         if not written_entries(store, attempt_id, only_unmarked=True):
             return results(store, attempt_id)
         _require_consent()
-        with _marking_slot() as busy:
+        with _pipeline_slot("marking answers") as busy:
             if busy:
-                raise HTTPException(status_code=409, detail=busy)
+                raise HTTPException(status_code=409, detail=_busy_marking(busy))
             return remark(store, attempt_id, marker=_new_marker(), now=_now())
 
 
-@router.get("/progress")
-def get_progress() -> dict[str, Any]:
+def _course_nodes() -> list:
     from coursegen import config
     from coursegen.ingest.coursemap import load_course_map
 
@@ -198,8 +204,70 @@ def get_progress() -> dict[str, Any]:
             status_code=409,
             detail="No course material has been ingested yet. Upload your notes first.",
         )
+    return load_course_map(config.COURSE_MAP_PATH)
+
+
+def _new_generator(nodes: list) -> FreshGenerator:
+    """Write re-worded review questions with the paper pipeline's own generation
+    and gates. A model that cannot be reached yields nothing, and every card that
+    needed new wording falls back to its original — labelled, never passed off."""
+    from coursegen import config
+
+    def generate(specs: list) -> dict:
+        import httpx
+
+        from coursegen.exam.generate import generate_exam
+        from coursegen.ingest.embed import dense_embedding_fn
+        from coursegen.ingest.index import read_spans
+        from coursegen.llm.client import BudgetExceeded, LLMClient
+
+        main = _main()
+        try:
+            reranker, embed = main._get_reranker(), main._get_embed_model()
+            span_text, span_source = read_spans(
+                sorted({sid for s in specs for sid in s.span_ids}), config.DATA_DIR
+            )
+            result = generate_exam(
+                specs=specs, course_map=nodes, span_text_by_id=span_text,
+                span_source_by_id=span_source, llm_client=LLMClient(),
+                # Its own output directory: generation writes run_manifest.json,
+                # which must not overwrite the latest paper's.
+                output_dir=config.OUTPUT_DIR / "review",
+                cache_dir=config.OUTPUT_DIR / "cache",
+                blueprint_id="review",
+                groundedness_scorer=lambda a, src: float(reranker.predict([(a, src)])[0]),
+                embedding_fn=dense_embedding_fn(embed),
+            )
+        except (BudgetExceeded, httpx.HTTPError, EnvironmentError) as exc:
+            logger.warning("Review re-wording unavailable: %s", type(exc).__name__)
+            return {}
+        return {item.slot_id: item for item in result.items}
+
+    return generate
+
+
+@router.post("/review")
+def post_review() -> dict[str, Any]:
+    nodes = _course_nodes()
     with _errors(), Store() as store:
-        return progress(store, load_course_map(config.COURSE_MAP_PATH))
+        if not needs_model(store, nodes):
+            # Identical questions only: the student's own history, nothing else.
+            return build_review(store, nodes, now=_now(), generate_fresh=None)
+        _require_consent()
+        with _pipeline_slot("building a review") as busy:
+            if busy:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Busy {busy}. Build the review again when it finishes.",
+                )
+            return build_review(store, nodes, now=_now(), generate_fresh=_new_generator(nodes))
+
+
+@router.get("/progress")
+def get_progress() -> dict[str, Any]:
+    nodes = _course_nodes()
+    with _errors(), Store() as store:
+        return progress(store, nodes)
 
 
 @router.get("/sheets/{sheet_id}")

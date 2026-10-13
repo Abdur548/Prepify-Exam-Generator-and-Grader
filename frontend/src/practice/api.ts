@@ -1,4 +1,4 @@
-import type { AttemptResult, ItemResult, Progress, SheetDoc } from "./types";
+import type { AttemptResult, ItemResult, Progress, ReviewResponse, SheetDoc } from "./types";
 
 /** A non-2xx answer. `status` lets a caller route a 403 to the consent screen. */
 export class ApiError extends Error {
@@ -76,4 +76,9 @@ export function getSheet(sheetId: string): Promise<SheetDoc> {
 
 export function getProgress(): Promise<Progress> {
   return call("/api/progress");
+}
+
+/** Builds the next review set from the re-tests that are due. */
+export function startReview(): Promise<ReviewResponse> {
+  return call("/api/review", { method: "POST" });
 }

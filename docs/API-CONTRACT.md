@@ -382,6 +382,29 @@ and never present a `null` mastery as 0. Re-tests are spaced in **attempts, not 
 review, then 2, 4 and 8 attempts later) — do not describe it as time-based. Answers about
 material that is no longer ingested are left out and counted in `warnings`.
 
+### `POST /api/review` → 200 / 403 / 409
+No body. Builds a review set from the re-tests that are due — at most 10, one per passage —
+archives it as a sheet, and returns:
+```jsonc
+{"due": 2, "sheet": { /* paper shape, "kind": "review", one section "R" */ },
+ "fallbacks": 0, "orphans": 0, "warnings": []}
+```
+`due: 0` with `"sheet": null` when nothing is due — an answer, not an error. The sheet is
+answered with `POST /api/attempts` like any paper. Each item carries `retest_of
+{sheet_id, slot_id}` and `form`:
+
+| `form` | meaning | show it as |
+|---|---|---|
+| `identical` | the question they missed, options reordered | "re-test: same question" |
+| `fresh` | passed once already; a new question on the same passage | "re-test: new question" |
+| `fallback` | new wording was needed but could not be had | "couldn't write a new question — here's the original" |
+
+A review of identical questions reads only the student's history: no model, no consent, no
+lock. When any question needs new wording, the model writes it through the same generation
+and gates as a paper: **403** without consent, **409** while the pipeline is busy. A model
+that cannot be reached is not an error — those questions fall back, `fallbacks` counts them
+and `warnings` says so. 409 also when no material has been ingested.
+
 ### `adaptive` on `POST /api/plan`, `POST /api/exam` and `POST /api/exam/stream`
 All three take an optional `"adaptive": true` (default `false`, which is exactly the
 behaviour before MVP 2). Adaptive does two things, both deterministic — the same history

@@ -108,3 +108,19 @@ export interface Progress {
   next_review: number;
   warnings: string[];
 }
+
+/** Mirrors `POST /api/review`. `sheet` is null when nothing is due. */
+export interface ReviewResponse {
+  due: number;
+  sheet: SheetDoc | null;
+  fallbacks: number;
+  orphans: number;
+  warnings: string[];
+}
+
+/** How each kind of re-test is labelled above its question. */
+export const RETEST_TAGS: Record<RetestForm, string> = {
+  identical: "re-test: same question",
+  fresh: "re-test: new question",
+  fallback: "couldn't write a new question — here's the original",
+};

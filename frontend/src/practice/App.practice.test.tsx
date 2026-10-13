@@ -15,9 +15,23 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false) {
+const REVIEW_SHEET = {
+  ...SHEET,
+  kind: "review",
+  sheet_id: "rev0000000000001",
+  title: "Review — 1 question you missed",
+  sections: [{
+    ...SHEET.sections[0],
+    section_id: "R", title: "Review",
+    items: [{ ...SHEET.sections[0].items[0], slot_id: "R-01", form: "identical",
+              retest_of: { sheet_id: SHEET.sheet_id, slot_id: "A-01" } }],
+  }],
+};
+
+function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false, refuseFirstReview = false) {
   const calls: { url: string; body?: unknown }[] = [];
   let submits = 0;
+  let reviews = 0;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const ok = (data: unknown) =>
@@ -31,6 +45,14 @@ function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false) {
           { status: 403, headers: { "Content-Type": "application/json" } });
       }
       return ok(RESULT);
+    }
+    if (url === "/api/review") {
+      reviews += 1;
+      if (refuseFirstReview && reviews === 1) {
+        return new Response(JSON.stringify({ detail: "Consent is needed before your answers are sent to the model." }),
+          { status: 403, headers: { "Content-Type": "application/json" } });
+      }
+      return ok({ due: 1, sheet: REVIEW_SHEET, fallbacks: 0, orphans: 0, warnings: [] });
     }
     if (url.endsWith("/remark")) return ok({ ...RESULT, totals: { ...RESULT.totals, unmarked: 0 } });
     if (url === "/api/blueprints") return ok(["quiz_default"]);
@@ -181,5 +203,31 @@ describe("taking a paper", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url === "/api/plan" && (c.body as { adaptive?: boolean })?.adaptive === true)).toBe(true),
     );
+  });
+
+  it("starts a review from the progress tab and labels each re-test", async () => {
+    const calls = stubApi();
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(ui.getByRole("button", { name: "Progress" }));
+    fireEvent.click(await ui.findByRole("button", { name: /start review \(1\)/i }));
+    expect(await ui.findByText("re-test: same question")).toBeTruthy();
+    fireEvent.click(ui.getByLabelText(/Queue/));
+    fireEvent.click(ui.getByRole("button", { name: /submit answers/i }));
+    await ui.findByText(/marked so far/);
+    expect(calls.find((c) => c.url === "/api/attempts")?.body).toEqual({
+      sheet_id: REVIEW_SHEET.sheet_id, answers: [{ slot_id: "R-01", response: "B" }],
+    });
+  });
+
+  it("asks for consent when a review needs new wording, then builds it", async () => {
+    const calls = stubApi(SHEET, false, true);
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(ui.getByRole("button", { name: "Progress" }));
+    fireEvent.click(await ui.findByRole("button", { name: /start review/i }));
+    fireEvent.click(await ui.findByRole("button", { name: /I understand/i }));
+    expect(await ui.findByText("re-test: same question")).toBeTruthy();
+    expect(calls.filter((c) => c.url === "/api/review")).toHaveLength(2);
   });
 });

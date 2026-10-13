@@ -8,9 +8,16 @@ import { Paper } from "./paper/Paper";
 import { AnswerSheet } from "./practice/AnswerSheet";
 import { ProgressScreen } from "./practice/ProgressScreen";
 import { Results } from "./practice/Results";
-import { ApiError, contestMark, getAttempt, remarkAttempt, submitAttempt } from "./practice/api";
+import {
+  ApiError,
+  contestMark,
+  getAttempt,
+  remarkAttempt,
+  startReview as requestReview,
+  submitAttempt,
+} from "./practice/api";
 import { clearDraft } from "./practice/drafts";
-import type { AttemptResult, SheetDoc } from "./practice/types";
+import { RETEST_TAGS, type AttemptResult, type SheetDoc, type SheetItem } from "./practice/types";
 import type { Plan } from "./plan/types";
 import type { RunOutcome } from "./generate/types";
 import type { Paper as PaperDoc } from "./paper/types";
@@ -53,6 +60,10 @@ export default function App() {
   // Answers waiting on consent. The server refused them with 403 and nothing was
   // stored, so they are held here and sent again, unchanged, once accepted.
   const [awaitingConsent, setAwaitingConsent] = useState<Record<string, string> | null>(null);
+  // A review that needs new wording was refused for want of consent; build it
+  // again once given.
+  const [reviewAwaitingConsent, setReviewAwaitingConsent] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [accepted, setAccepted] = useState(() => {
     try {
       return sessionStorage.getItem(ACCEPTED_KEY) === "yes";
@@ -131,6 +142,26 @@ export default function App() {
     },
     [attempt],
   );
+
+  const startReview = useCallback(async () => {
+    setReviewError("");
+    try {
+      const review = await requestReview();
+      if (review.sheet) {
+        takeSheet(review.sheet);
+      } else {
+        setReviewError("Nothing is due for review yet.");
+      }
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        setReviewAwaitingConsent(true);
+        setAccepted(false);
+        setScreen("disclosure");
+        return;
+      }
+      setReviewError(e instanceof Error ? e.message : "The review could not be built.");
+    }
+  }, [takeSheet]);
 
   const remark = useCallback(async () => {
     if (!attempt) return;
@@ -225,6 +256,12 @@ export default function App() {
           <DisclosureScreen
             onAccepted={() => {
               remember();
+              if (reviewAwaitingConsent) {
+                setReviewAwaitingConsent(false);
+                setScreen("progress");
+                void startReview();
+                return;
+              }
               if (awaitingConsent) {
                 const responses = awaitingConsent;
                 setAwaitingConsent(null);
@@ -235,6 +272,11 @@ export default function App() {
               setScreen(run ? "generating" : "blueprint");
             }}
             onBack={() => {
+              if (reviewAwaitingConsent) {
+                setReviewAwaitingConsent(false);
+                setScreen("progress");
+                return;
+              }
               if (awaitingConsent) {
                 setAwaitingConsent(null);
                 setScreen("answer");
@@ -279,18 +321,34 @@ export default function App() {
 
         {screen === "answer" && sheet && (
           <div className="harness__main">
+            {sheet.kind === "review" && sheet.summary.warnings.length > 0 && (
+              <div className="notice notice--empty takebar" role="status">
+                <ul className="notice__list">
+                  {sheet.summary.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <AnswerSheet
               sheet={sheet}
               submitting={submitting}
               error={submitError}
               onSubmit={submit}
+              tagFor={sheet.kind === "review" ? reviewTag : undefined}
             />
           </div>
         )}
 
         {screen === "progress" && (
           <div className="harness__main">
+            {reviewError && (
+              <p className="takebar takebar--off" role="status">
+                {reviewError}
+              </p>
+            )}
             <ProgressScreen
+              onStartReview={startReview}
               onNextPaper={() => {
                 setAdaptive(true);
                 setScreen("blueprint");
@@ -312,6 +370,11 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+/** A review item's label: how it re-tests the question it came from. */
+function reviewTag(item: SheetItem): string | null {
+  return item.form ? RETEST_TAGS[item.form] : null;
 }
 
 /**
