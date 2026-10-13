@@ -43,6 +43,10 @@ export interface PaperItem {
   /** The passage the question was written from. Absent for synthesis items. */
   source_excerpt?: string | null;
   factuality?: Factuality;
+  /** The course-map node this question tests. A mark on it is evidence about it. */
+  node_id?: string;
+  /** The node's heading path, e.g. "Lecture 3 › 3.2 Search". Null when unknown. */
+  topic?: string | null;
 }
 
 export interface PaperSection {
@@ -68,6 +72,11 @@ export interface PaperSummary {
 }
 
 export interface Paper {
+  /**
+   * The archived copy this paper is answered against. Null when archiving failed:
+   * the paper is still readable but cannot be taken (the summary says why).
+   */
+  sheet_id?: string | null;
   title: string;
   blueprint_id: string;
   blueprint_title: string;

@@ -53,17 +53,23 @@ def build_paper(
     title: str,
     span_text_by_id: Optional[dict[str, str]] = None,
     factuality: Optional[dict[str, str]] = None,
+    node_path_by_id: Optional[dict[str, list[str]]] = None,
 ) -> dict[str, Any]:
     """Assemble the paper as JSON, grouped by section in blueprint order.
 
     `factuality` maps slot_id -> verdict when gate 5 ran. Absent means the gate did
     not run, which is reported as `null` rather than omitted: a client must be able
     to tell "not checked" from "checked and unsupported".
+
+    `node_path_by_id` names the course-map node each question came from, as
+    `topic`. Practice needs both fields: a mark is evidence about a NODE, and a
+    student is told about it by its heading path, never by a hash.
     """
     spec_by_slot = {s.slot_id: s for s in specs}
     item_by_slot = {i.slot_id: i for i in items}
     span_text_by_id = span_text_by_id or {}
     factuality = factuality or {}
+    node_path_by_id = node_path_by_id or {}
 
     sections: list[dict[str, Any]] = []
     for section in blueprint.sections:
@@ -85,7 +91,9 @@ def build_paper(
                     "item_type": spec.item_type,
                 })
                 continue
-            rendered.append(_render_item(spec, item, span_text_by_id, factuality))
+            rendered.append(
+                _render_item(spec, item, span_text_by_id, factuality, node_path_by_id)
+            )
 
         sections.append({
             "section_id": section.section_id,
@@ -155,8 +163,10 @@ def _render_item(
     item: GeneratedItem,
     span_text_by_id: dict[str, str],
     factuality: dict[str, str],
+    node_path_by_id: dict[str, list[str]],
 ) -> dict[str, Any]:
     from_material = spec.grounding == "span"
+    path = node_path_by_id.get(spec.node_id)
     source = item.source_ref
     return {
         "slot_id": spec.slot_id,
@@ -180,6 +190,10 @@ def _render_item(
         "source_excerpt": _excerpt(spec, span_text_by_id) if from_material else None,
         # None means gate 5 did not run. Distinct from a negative verdict.
         "factuality": factuality.get(spec.slot_id),
+        # Which course-map node this question tests. A mark on it is evidence
+        # about that node, which is what mastery and the next paper are built on.
+        "node_id": spec.node_id,
+        "topic": " › ".join(path) if path else None,
     }
 
 

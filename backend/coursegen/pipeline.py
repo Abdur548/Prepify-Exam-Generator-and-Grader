@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -240,7 +241,13 @@ def generate_paper(
         title=title,
         span_text_by_id=span_text,
         factuality=verdict_by_slot,
+        node_path_by_id={n.node_id: n.path for n in nodes},
     )
+    # Archived under its own id before paper.json is written, so the paper a
+    # student answers is the paper they were shown, whatever is generated next.
+    from coursegen.grade.sheets import archive_paper
+
+    paper = archive_paper(paper, specs, now=datetime.now().isoformat(timespec="seconds"))
     (output_dir / "paper.json").write_text(
         json.dumps(paper, indent=2, sort_keys=True), encoding="utf-8"
     )
