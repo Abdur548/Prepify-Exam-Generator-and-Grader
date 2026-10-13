@@ -337,7 +337,7 @@ def _mcq_hygiene_issue(item: GeneratedItem) -> str | None:
     return None
 
 
-def _shuffle_options(item: GeneratedItem) -> GeneratedItem:
+def _shuffle_options(item: GeneratedItem, seed: str | None = None) -> GeneratedItem:
     """
     Shuffle MCQ options deterministically, then relabel by position and remap
     `correct_option` to match.
@@ -375,7 +375,10 @@ def _shuffle_options(item: GeneratedItem) -> GeneratedItem:
     correct_old = correct_positions[0]
 
     order = list(range(len(options)))
-    random.Random(f"{config.MCQ_SHUFFLE_SEED}:{item.slot_id}").shuffle(order)
+    # `seed` lets a re-test reorder a question it has already shown (MVP 2, §7.4)
+    # through this same relabelling, rather than a second copy of it. The default
+    # is the paper's own per-slot seed, unchanged.
+    random.Random(seed or f"{config.MCQ_SHUFFLE_SEED}:{item.slot_id}").shuffle(order)
 
     relabelled = [
         MCQOption(label=config.MCQ_OPTION_LABELS[new_pos], text=options[old_pos].text)
