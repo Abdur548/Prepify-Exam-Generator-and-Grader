@@ -40,7 +40,20 @@ export interface PlanSummary {
   estimated_calls: number;
 }
 
+/** Present only when the plan was asked for with `adaptive: true`. */
+export interface PlanAdaptive {
+  /** False: there is no answer history yet, so nothing was adapted. */
+  applied: boolean;
+  tilted_nodes: number;
+  /** Slots now testing different material than they would without history. */
+  changed_slots: number;
+  /** Questions already seen, to be asked again in new words. */
+  reworded: number;
+  orphans: number;
+}
+
 export interface Plan {
+  adaptive?: PlanAdaptive;
   blueprint_id: string;
   title: string;
   total_marks: number;

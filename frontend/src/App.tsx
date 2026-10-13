@@ -39,7 +39,9 @@ const ACCEPTED_KEY = "prepify.disclosure";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("blueprint");
-  const [run, setRun] = useState<{ blueprintId: string; plan: Plan } | null>(null);
+  const [run, setRun] = useState<{ blueprintId: string; plan: Plan; adaptive: boolean } | null>(null);
+  // MVP 2: aim the next paper at the student's weak topics.
+  const [adaptive, setAdaptive] = useState(false);
   const [paper, setPaper] = useState<PaperDoc | null>(null);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
   const [fromMaterialOnly, setFromMaterialOnly] = useState(false);
@@ -144,12 +146,12 @@ export default function App() {
   // decides whether the gate has been met rather than a check per entry point.
   const startRun = useCallback(
     (next: { blueprintId: string; plan: Plan }) => {
-      setRun(next);
+      setRun({ ...next, adaptive });
       setPaper(null);
       setOutcome(null);
       setScreen(accepted ? "generating" : "disclosure");
     },
-    [accepted],
+    [accepted, adaptive],
   );
 
   return (
@@ -214,6 +216,8 @@ export default function App() {
         {screen === "blueprint" && (
           <BlueprintScreen
             onGenerate={(blueprintId, plan) => startRun({ blueprintId, plan })}
+            adaptive={adaptive}
+            onAdaptiveChange={setAdaptive}
           />
         )}
 
@@ -244,6 +248,7 @@ export default function App() {
         {screen === "generating" && run && (
           <GeneratingScreen
             blueprintId={run.blueprintId}
+            adaptive={run.adaptive}
             plan={run.plan}
             onDone={handleDone}
             onBack={() => setScreen("blueprint")}
@@ -285,7 +290,12 @@ export default function App() {
 
         {screen === "progress" && (
           <div className="harness__main">
-            <ProgressScreen />
+            <ProgressScreen
+              onNextPaper={() => {
+                setAdaptive(true);
+                setScreen("blueprint");
+              }}
+            />
           </div>
         )}
 

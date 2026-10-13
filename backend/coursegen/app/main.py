@@ -590,6 +590,8 @@ def ingest_status() -> dict[str, Any]:
 
 class PlanRequest(BaseModel):
     blueprint_id: str
+    # MVP 2: preview the paper tilted by the student's history. Off by default.
+    adaptive: bool = False
 
 
 @app.post("/api/plan")
@@ -620,8 +622,19 @@ def plan_paper(request: PlanRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc))
 
     nodes = load_course_map(config.COURSE_MAP_PATH)
-    specs, coverage = solve(nodes, blueprint)
-    return build_plan(specs, coverage, blueprint, nodes)
+    if not request.adaptive:
+        specs, coverage = solve(nodes, blueprint)
+        return build_plan(specs, coverage, blueprint, nodes)
+
+    # The same `adapt` generation uses, so the preview is the paper they get.
+    from coursegen.grade.adaptive import adapt
+    from coursegen.grade.store import Store
+
+    with Store() as store:
+        adapted = adapt(nodes, blueprint, store)
+    plan = build_plan(adapted.specs, adapted.coverage, blueprint, nodes)
+    plan["adaptive"] = adapted.summary()
+    return plan
 
 
 @app.get("/api/paper")
@@ -663,6 +676,8 @@ def get_file(filename: str) -> FileResponse:
 class ExamRequest(BaseModel):
     blueprint_id: str
     title: str
+    # MVP 2: tilt by the student's mastery and reword already-seen questions.
+    adaptive: bool = False
 
 
 def _require_disclosure() -> None:
@@ -680,7 +695,8 @@ def generate_exam(request: ExamRequest) -> dict[str, Any]:
     # Serialised: see _PIPELINE_LOCK. Held across the whole run because the
     # artifacts only agree with the manifest once render has finished.
     with _hold_pipeline("generating a paper"):
-        result = _exam_outcome(request.blueprint_id, request.title)
+        result = _exam_outcome(request.blueprint_id, request.title,
+                               adaptive=request.adaptive)
     if result.get("status") == "failed":
         raise HTTPException(status_code=500, detail=result["detail"])
     return result
@@ -690,6 +706,7 @@ def _exam_outcome(
     blueprint_id: str,
     title: str,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    adaptive: bool = False,
 ) -> dict[str, Any]:
     """Run one generation and map it onto the outcomes the contract freezes.
 
@@ -708,7 +725,8 @@ def _exam_outcome(
     know whether it had to wait in order to say so.
     """
     try:
-        return _run_exam_pipeline(blueprint_id, title, on_event=on_event)
+        return _run_exam_pipeline(blueprint_id, title, on_event=on_event,
+                                  adaptive=adaptive)
     except BudgetExceeded:
         logger.warning("Generation degraded: quota limit reached")
         return {
@@ -758,6 +776,7 @@ def _run_exam_pipeline(
     blueprint_id: str,
     title: str,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    adaptive: bool = False,
 ) -> dict[str, Any]:
     """Adapt `pipeline.generate_paper` to the API contract.
 
@@ -798,6 +817,7 @@ def _run_exam_pipeline(
         groundedness_scorer=lambda answer, src: float(reranker.predict([(answer, src)])[0]),
         embedding_fn=embedding_fn,
         on_event=on_event,
+        adaptive=adaptive,
     )
 
     # `coverage_ratio` is deliberately NOT returned (disconnected 2026-09-01). It
@@ -856,7 +876,7 @@ def generate_exam_streamed(request: ExamRequest) -> StreamingResponse:
     `/api/exam`. This is a real asymmetry, not an oversight — see `_exam_outcome`.
     """
     _require_disclosure()
-    blueprint_id, title = request.blueprint_id, request.title
+    blueprint_id, title, adaptive = request.blueprint_id, request.title, request.adaptive
     events: "queue.Queue[Any]" = queue.Queue()
 
     def run() -> None:
@@ -878,7 +898,8 @@ def generate_exam_streamed(request: ExamRequest) -> StreamingResponse:
                 events.put({"event": "stage", "stage": "waiting", "state": "done"})
             _pipeline_holder = "generating a paper"
             try:
-                body = _exam_outcome(blueprint_id, title, on_event=events.put)
+                body = _exam_outcome(blueprint_id, title, on_event=events.put,
+                                     adaptive=adaptive)
             finally:
                 _pipeline_holder = ""
                 _PIPELINE_LOCK.release()

@@ -159,3 +159,29 @@ describe("the silence deadline resets", () => {
     close();
   });
 });
+
+describe("the adaptive flag", () => {
+  function Adaptive({ adaptive }: { adaptive?: boolean }) {
+    useGenerationRun("quiz_default", "Test", adaptive);
+    return null;
+  }
+
+  const bodyOf = (fetchMock: ReturnType<typeof vi.fn>) =>
+    JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+
+  it("is sent when the student asked for it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(ndjson([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Adaptive adaptive />);
+    await flush();
+    expect(bodyOf(fetchMock)).toEqual({ blueprint_id: "quiz_default", title: "Test", adaptive: true });
+  });
+
+  it("is off by default", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(ndjson([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Adaptive />);
+    await flush();
+    expect(bodyOf(fetchMock).adaptive).toBe(false);
+  });
+});

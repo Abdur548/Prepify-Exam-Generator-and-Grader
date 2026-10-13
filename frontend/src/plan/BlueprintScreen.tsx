@@ -26,9 +26,12 @@ interface Props {
    *  the dry run the student just read, so it must not re-fetch and risk showing
    *  them a different set of numbers than the ones they pressed Generate on. */
   onGenerate?: (blueprintId: string, plan: Plan) => void;
+  /** Aim the paper at the student's weak topics (MVP 2). */
+  adaptive?: boolean;
+  onAdaptiveChange?: (adaptive: boolean) => void;
 }
 
-export function BlueprintScreen({ onGenerate }: Props) {
+export function BlueprintScreen({ onGenerate, adaptive = false, onAdaptiveChange }: Props) {
   const { presets, loading: listing, error: listError } = useBlueprints();
   // Empty until the server says what it has. Defaulting to a literal id would
   // reintroduce exactly the assumption this screen stopped making.
@@ -57,7 +60,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
     fetch("/api/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blueprint_id: blueprintId }),
+      body: JSON.stringify({ blueprint_id: blueprintId, adaptive }),
     })
       .then(async (r) => {
         const body = await r.json().catch(() => ({}));
@@ -77,7 +80,7 @@ export function BlueprintScreen({ onGenerate }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [blueprintId, attempt]);
+  }, [blueprintId, attempt, adaptive]);
 
   return (
     <div className="bp">
@@ -130,6 +133,24 @@ export function BlueprintScreen({ onGenerate }: Props) {
               <p className="presets__note">This server has no blueprints installed.</p>
             )}
           </fieldset>
+
+          {onAdaptiveChange && (
+            <label className="field adapt">
+              <input
+                type="checkbox"
+                checked={adaptive}
+                onChange={(e) => onAdaptiveChange(e.target.checked)}
+              />
+              <span>
+                <span className="adapt__label">Aim at my weak topics</span>
+                <span className="field__why">
+                  Uses your marks so far: weak material is asked about more,
+                  mastered material less, and questions you have already seen come
+                  back in new words.
+                </span>
+              </span>
+            </label>
+          )}
 
           {plan && (
             <fieldset className="field">
@@ -252,6 +273,14 @@ export function BlueprintScreen({ onGenerate }: Props) {
                     <dd>{Math.round(plan.summary.allocation_fidelity * 100)}%</dd>
                   </div>
                 </dl>
+
+                {plan.adaptive && (
+                  <p className="adapt__note" role="status">
+                    {plan.adaptive.applied
+                      ? `${plan.adaptive.changed_slots} question${plan.adaptive.changed_slots === 1 ? "" : "s"} moved toward your weak topics; ${plan.adaptive.reworded} already seen will come back in new words.`
+                      : "No answers yet — this paper is not adapted. Take a paper first."}
+                  </p>
+                )}
 
                 <Advisories warnings={plan.summary.warnings} />
 

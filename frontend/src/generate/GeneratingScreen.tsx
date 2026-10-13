@@ -33,6 +33,8 @@ import "./generate.css";
 
 interface Props {
   blueprintId: string;
+  /** Aim the paper at the student's weak topics (MVP 2). */
+  adaptive?: boolean;
   plan: Plan;
   onDone: (paper: PaperDoc, outcome: RunOutcome) => void;
   onBack: () => void;
@@ -60,13 +62,14 @@ export function GeneratingScreen(props: Props) {
 
 function Run({
   blueprintId,
+  adaptive = false,
   plan,
   onDone,
   onBack,
   onRetry,
   onNeedsDisclosure,
 }: Props & { onRetry: () => void }) {
-  const run = useGenerationRun(blueprintId, plan.title);
+  const run = useGenerationRun(blueprintId, plan.title, adaptive);
   const [handoffError, setHandoffError] = useState("");
 
   // The run reports the outcome; the paper itself lives at GET /api/paper. Two

@@ -406,3 +406,9 @@
   color: var(--graphite-light);
   overflow-wrap: anywhere;
 }
+
+/* MVP 2: aim the paper at the student's weak topics. */
+.adapt { display: flex; gap: var(--s-3); align-items: flex-start; cursor: pointer; }
+.adapt input { margin-top: 3px; accent-color: var(--slate); }
+.adapt__label { display: block; font-weight: 500; color: var(--ink); }
+.adapt__note { margin: var(--s-3) 0 0; font-size: var(--t-sm); color: var(--graphite); }

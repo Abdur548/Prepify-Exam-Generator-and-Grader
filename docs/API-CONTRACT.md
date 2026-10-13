@@ -382,6 +382,27 @@ and never present a `null` mastery as 0. Re-tests are spaced in **attempts, not 
 review, then 2, 4 and 8 attempts later) — do not describe it as time-based. Answers about
 material that is no longer ingested are left out and counted in `warnings`.
 
+### `adaptive` on `POST /api/plan`, `POST /api/exam` and `POST /api/exam/stream`
+All three take an optional `"adaptive": true` (default `false`, which is exactly the
+behaviour before MVP 2). Adaptive does two things, both deterministic — the same history
+always gives the same paper:
+
+- **Tilts the solver** by each tested node's mastery: a failed node's mass ×2.0, a mastered
+  one ×0.25, an untested one unchanged. It changes which material fills the slots, never the
+  blueprint's shape. On lecture slides a passage carries at most one question per paper, so
+  it cannot drill a weak topic harder within one paper.
+- **Rewords what the student has seen.** Any question identical to one on a submitted sheet
+  is regenerated with the old stems quoted as "write a different question". Identical
+  re-asking is the review set's job, never the next paper's.
+
+`/api/plan` with `adaptive: true` adds, at no cost and with no model call:
+```json
+"adaptive": {"applied": true, "tilted_nodes": 9, "changed_slots": 4, "reworded": 2, "orphans": 0}
+```
+`applied: false` means there is no answer history yet — say "this paper is not adapted",
+never imply it was. The generated paper then carries that warning in `summary.warnings`, and
+`run_manifest.json` records the same `adaptive` block on every adaptive run.
+
 ### `GET /api/sheets/{sheet_id}` → 200 / 404
 The archived sheet document, verbatim: the paper shape, plus `sheet_id`.
 

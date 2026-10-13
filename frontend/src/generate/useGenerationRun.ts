@@ -82,7 +82,12 @@ const INITIAL: RunState = {
   elapsed: 0,
 };
 
-export function useGenerationRun(blueprintId: string, title: string): RunState {
+export function useGenerationRun(
+  blueprintId: string,
+  title: string,
+  /** MVP 2: tilt by the student's mastery and reword questions already seen. */
+  adaptive = false,
+): RunState {
   const [state, setState] = useState<RunState>(INITIAL);
   const started = useRef(false);
   const startedAt = useRef(0);
@@ -155,7 +160,7 @@ export function useGenerationRun(blueprintId: string, title: string): RunState {
         const res = await fetch("/api/exam/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ blueprint_id: blueprintId, title }),
+          body: JSON.stringify({ blueprint_id: blueprintId, title, adaptive }),
         });
 
         // A non-200 is JSON, not NDJSON — the request never got as far as
@@ -218,7 +223,7 @@ export function useGenerationRun(blueprintId: string, title: string): RunState {
       window.clearInterval(ticker);
       window.clearTimeout(silence);
     };
-  }, [blueprintId, title]);
+  }, [blueprintId, title, adaptive]);
 
   return state;
 }

@@ -82,6 +82,7 @@ def generate_paper(
     verify: bool = False,
     progress: Optional[Callable[[str], None]] = None,
     on_event: Optional[Callable[[dict[str, Any]], None]] = None,
+    adaptive: bool = False,
 ) -> PaperResult:
     """Produce one paper. The only place these stages are sequenced.
 
@@ -167,7 +168,20 @@ def generate_paper(
     # both what to ask about and have the text in hand — which is what the label
     # claims, and the only grouping that keeps the order honest.
     stage("choosing", "start")
-    specs, coverage = solve(nodes, blueprint)
+    # `adaptive` (MVP 2): tilt by the student's mastery and ask for new wording
+    # wherever they have already seen a question. Off, this is exactly MVP 1.
+    adapted = None
+    if adaptive:
+        from coursegen.grade.adaptive import adapt
+        from coursegen.grade.store import Store
+
+        with Store() as store:
+            adapted = adapt(nodes, blueprint, store)
+        specs, coverage = adapted.specs, adapted.coverage
+        say(lambda: f"adaptive: {adapted.changed_slots} slots moved, "
+                    f"{adapted.reworded} reworded")
+    else:
+        specs, coverage = solve(nodes, blueprint)
     say(lambda: f"allocated {len(specs)}/{coverage.slots_total} slots "
               f"(fill {coverage.fill_ratio:.0%}, "
               f"fidelity {coverage.allocation_fidelity:.2f})")
@@ -212,6 +226,8 @@ def generate_paper(
     # `writing`, and they check relevance, not correctness.
     stage("assembling", "start")
     manifest = dict(result.manifest)
+    if adapted is not None:
+        manifest["adaptive"] = adapted.summary()
     factuality_summary, verdict_by_slot = _run_factuality_gate(
         result.items, specs, span_text, client, verify, say
     )
@@ -243,6 +259,12 @@ def generate_paper(
         factuality=verdict_by_slot,
         node_path_by_id={n.node_id: n.path for n in nodes},
     )
+    if adapted is not None and not adapted.applied:
+        # Asked for, and nothing to adapt to. Said on the paper, so a student who
+        # chose "aim at my weak topics" is not left believing it was.
+        from coursegen.grade.adaptive import NOT_ADAPTED
+
+        paper["summary"]["warnings"] = [*paper["summary"]["warnings"], NOT_ADAPTED]
     # Archived under its own id before paper.json is written, so the paper a
     # student answers is the paper they were shown, whatever is generated next.
     from coursegen.grade.sheets import archive_paper

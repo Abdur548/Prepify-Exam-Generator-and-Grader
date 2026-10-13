@@ -146,7 +146,7 @@ class TestStagesComeFromTheRun:
         injected by the fake pipeline through the same `on_event` the real one
         uses, so the wiring — not a timer — is what produces them."""
 
-        def fake(blueprint_id, title, on_event=None):
+        def fake(blueprint_id, title, on_event=None, adaptive=False):
             for stage in ("reading", "choosing", "writing", "assembling"):
                 on_event({"event": "stage", "stage": stage, "state": "start"})
                 on_event({"event": "stage", "stage": stage, "state": "done"})
@@ -163,7 +163,7 @@ class TestStagesComeFromTheRun:
         assert events[-1]["event"] == "result", "the result is terminal"
 
     def test_batch_events_pass_through(self, client) -> None:
-        def fake(blueprint_id, title, on_event=None):
+        def fake(blueprint_id, title, on_event=None, adaptive=False):
             on_event({"event": "batch", "phase": "writing", "done": 6, "total": 20})
             return dict(_OK_BODY)
 
@@ -578,7 +578,7 @@ class TestOverRealHttp:
 
         gap = 0.4
 
-        def slow(blueprint_id, title, on_event=None):
+        def slow(blueprint_id, title, on_event=None, adaptive=False):
             on_event({"event": "stage", "stage": "reading", "state": "start"})
             time.sleep(gap)
             on_event({"event": "stage", "stage": "reading", "state": "done"})

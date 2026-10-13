@@ -33,6 +33,19 @@ function stubApi(paper: unknown = SHEET, refuseFirstSubmit = false) {
       return ok(RESULT);
     }
     if (url.endsWith("/remark")) return ok({ ...RESULT, totals: { ...RESULT.totals, unmarked: 0 } });
+    if (url === "/api/blueprints") return ok(["quiz_default"]);
+    if (url === "/api/preflight") return ok({ api_key: "ok", output_dir: "ok", weasyprint: "ok", qdrant: "ok", models: "ok", memory: "ok" });
+    if (url === "/api/plan") {
+      const req = init?.body ? JSON.parse(String(init.body)) : {};
+      return ok({
+        blueprint_id: "quiz_default", title: "Quiz", total_marks: 20, duration_minutes: 30,
+        sections: [],
+        summary: { slots_total: 4, slots_planned: 4, fill_ratio: 1, allocation_fidelity: 1,
+                   marks_planned: 20, short_by_marks: 0, synthesis_items: 0, sources_used: [],
+                   bloom_realised: {}, bloom_declared: null, warnings: [], estimated_calls: 1 },
+        ...(req.adaptive ? { adaptive: { applied: true, tilted_nodes: 3, changed_slots: 2, reworded: 1, orphans: 0 } } : {}),
+      });
+    }
     if (url === "/api/progress") {
       return ok({ attempts: 1, due: 1, next_review: 1, warnings: [],
                   cards: { box_1: 1, box_2: 0, box_3: 0, box_4: 0, retired: 0 },
@@ -149,5 +162,20 @@ describe("taking a paper", () => {
     fireEvent.click(ui.getByRole("button", { name: /submit answers/i }));
     fireEvent.click(await ui.findByRole("button", { name: /^done$/i }));
     expect(await ui.findByRole("heading", { name: /your progress/i })).toBeTruthy();
+  });
+
+  it("aims the next paper at weak topics from the progress tab", async () => {
+    const calls = stubApi();
+    const { container } = render(<App />);
+    const ui = within(container);
+    fireEvent.click(ui.getByRole("button", { name: "Progress" }));
+    fireEvent.click(await ui.findByRole("button", { name: /next paper, aimed at my weak topics/i }));
+
+    const box = (await ui.findByLabelText(/aim at my weak topics/i)) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(await ui.findByText(/2 questions moved toward your weak topics/i)).toBeTruthy();
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === "/api/plan" && (c.body as { adaptive?: boolean })?.adaptive === true)).toBe(true),
+    );
   });
 });
