@@ -476,6 +476,64 @@ instrument — an NLI/entailment model, or the LLM as verifier — and is queued
 
 ---
 
+## E9 — the adaptive next paper (MVP 2)
+
+**Claim under test:** after a student takes a paper, `adaptive: true` gives a next paper
+that puts more of its marks on material they got wrong or have not been tested on than the
+same blueprint would without their history.
+
+**Falsification:** if the tilted paper does not put more marks on weak + untested material
+than the untilted one, the claim is false and appears nowhere — not in the UI, the README or
+a slide. Repeats (a question already seen, asked again unchanged) must be 0.
+
+**Method:** `python -m coursegen.eval adapt`, no model calls. The untilted paper is solved
+and answered by a simulated student under three profiles (zero on the two heaviest
+lectures; alternately zero and full marks; full marks throughout). Because the solver is
+deterministic, the untilted *next* paper is the paper just taken. Weak = tested with mastery
+below `RETEST_BELOW` (0.6). The tilt constants (×2.0 failed, ×0.25 mastered) are
+uncalibrated starting values.
+
+### MEASURED 2026-10-13 — real course map, 571 nodes, 14 files
+
+Share of the next paper's marks on weak / untested / strong material:
+
+| blueprint | profile | untilted | tilted | slots moved | reworded | repeats | verdict |
+|---|---|---|---|---|---|---|---|
+| ai_fundamentals_v1 | weak_two_lectures | 0.50 / 0.00 / 0.50 | 0.50 / 0.46 / 0.04 | 14 | 7 | 0 | PASS |
+| ai_fundamentals_v1 | uniform_50 | 0.55 / 0.00 / 0.45 | 0.55 / 0.43 / 0.02 | 18 | 11 | 0 | PASS |
+| ai_fundamentals_v1 | all_correct | 0.00 / 0.00 / 1.00 | 0.00 / 0.86 / 0.14 | 18 | 3 | 0 | PASS |
+| final_default | weak_two_lectures | 0.37 / 0.00 / 0.63 | 0.43 / 0.38 / 0.19 | 30 | 4 | 0 | PASS |
+| final_default | uniform_50 | 0.50 / 0.00 / 0.50 | 0.50 / 0.28 / 0.22 | 29 | 8 | 0 | PASS |
+| final_default | all_correct | 0.00 / 0.00 / 1.00 | 0.00 / 0.52 / 0.48 | 21 | 12 | 0 | PASS |
+| midterm_default | weak_two_lectures | 0.35 / 0.00 / 0.65 | 0.35 / 0.45 / 0.20 | 18 | 5 | 0 | PASS |
+| midterm_default | uniform_50 | 0.55 / 0.00 / 0.45 | 0.48 / 0.23 / 0.28 | 15 | 10 | 0 | PASS |
+| midterm_default | all_correct | 0.00 / 0.00 / 1.00 | 0.00 / 0.50 / 0.50 | 16 | 6 | 0 | PASS |
+| quiz_default | weak_two_lectures | 0.60 / 0.00 / 0.40 | 0.45 / 0.55 / 0.00 | 7 | 2 | 0 | PASS |
+| quiz_default | uniform_50 | 0.55 / 0.00 / 0.45 | 0.65 / 0.10 / 0.25 | 5 | 2 | 0 | PASS |
+| quiz_default | all_correct | 0.00 / 0.00 / 1.00 | 0.00 / 0.50 / 0.50 | 5 | 2 | 0 | PASS |
+
+**12 of 12 PASS, 0 repeats, every row deterministic.**
+
+### What this result does NOT show
+
+**The tilt does not concentrate on weak material — it trades mastered material for
+untested material.** The weak share is unchanged in 8 of 12 rows, rises in 2 (final
+0.37 → 0.43, quiz 0.55 → 0.65) and *falls* in 2 (quiz 0.60 → 0.45, midterm 0.55 → 0.48).
+Every PASS is carried by the untested share rising from 0 while the strong share falls. That
+is the limit the design predicted: on lecture slides a passage carries at most one question
+per paper, so a weak node can be kept in the paper but not drilled harder within it —
+drilling is the review set's job. The tilt also steers only mass-placed slots; fall-through
+placement is unchanged by design.
+
+So the honest wording is **"the next paper keeps your weak topics and swaps what you have
+mastered for material you have not been tested on"** — not "the next paper targets your
+weak topics", which this table does not support. The simulated students answer every
+question; a real student who skips questions creates weak nodes the same way, but this
+measures the solver, not a learner. Whether practising this way improves a student's
+results is a different question, and nothing here answers it.
+
+---
+
 ## Build order
 
 1. **`baseline_naive`** — E2 is the phase's reason to exist and nothing else unblocks it.

@@ -5,6 +5,7 @@
     python -m coursegen.eval --seeds 30
 
     python -m coursegen.eval reliability --runs 10   # E8, SPENDS LIVE QUOTA
+    python -m coursegen.eval adapt                   # E9 adaptive next paper, free
 
 The allocation evaluation is free and deterministic. The reliability harness makes
 real API calls — roughly `runs x calls_per_paper` of them — so it takes an explicit
@@ -98,6 +99,23 @@ def _run_reliability(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_adapt(args: argparse.Namespace) -> int:
+    from coursegen.eval.adapt import evaluate, format_report as fmt, write_report as write
+
+    path = Path(args.course_map)
+    if not path.exists():
+        print(f"ERROR: no course map at {path}. Ingest a course first.")
+        return 1
+    nodes = load_course_map(path)
+    label = f"{path.name} ({len(nodes)} nodes, {len({n.source_file for n in nodes})} files)"
+    names = sorted(p.stem for p in BLUEPRINT_DIR.glob("*.json"))
+    results = {n: evaluate(nodes, bp) for n in names if (bp := _load(n)) is not None}
+    print(fmt(results, map_label=label))
+    txt, js = write(results, args.output, map_label=label)
+    print(f"\nWrote {txt}\nWrote {js}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -117,8 +135,16 @@ def main() -> int:
                      help="skip loading the cross-encoder (relevance gate reported as skipped)")
     rel.add_argument("--output", type=Path, default=config.OUTPUT_DIR)
 
+    ad = sub.add_parser("adapt", help="E9 adaptive next paper (free, no model calls)")
+    ad.add_argument("--course-map", default=str(config.COURSE_MAP_PATH))
+    ad.add_argument("--output", type=Path, default=config.OUTPUT_DIR)
+
     args = ap.parse_args()
-    return _run_reliability(args) if args.command == "reliability" else _run_allocation(args)
+    if args.command == "reliability":
+        return _run_reliability(args)
+    if args.command == "adapt":
+        return _run_adapt(args)
+    return _run_allocation(args)
 
 
 if __name__ == "__main__":
